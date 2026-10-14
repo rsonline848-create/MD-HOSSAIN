@@ -443,7 +443,7 @@ Keep your answers concise, friendly, and formatted nicely.
       }));
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-flash-latest',
         contents: formattedMessages,
         config: {
           systemInstruction,
