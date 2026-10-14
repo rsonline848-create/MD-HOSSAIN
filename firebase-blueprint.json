@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "app_data": {
+      "title": "AppData",
+      "description": "Real-time synced shop database state for ML Electric",
+      "type": "object",
+      "properties": {
+        "customers": { "type": "array", "description": "Customer accounts and balances" },
+        "suppliers": { "type": "array", "description": "Supplier accounts and payable balances" },
+        "products": { "type": "array", "description": "Product catalog items" },
+        "invoices": { "type": "array", "description": "Invoices and sales records" },
+        "duePayments": { "type": "array", "description": "Customer due payment records" },
+        "supplierBills": { "type": "array", "description": "Supplier purchase bills" },
+        "supplierPayments": { "type": "array", "description": "Supplier payment records" },
+        "expenses": { "type": "array", "description": "Shop daily expense entries" },
+        "openingCashList": { "type": "array", "description": "Opening cash records" },
+        "otherCashInList": { "type": "array", "description": "Other cash in records" },
+        "users": { "type": "array", "description": "User accounts and managers" },
+        "auditLogs": { "type": "array", "description": "Audit trail logs" },
+        "recycleBin": { "type": "array", "description": "Deleted items in recycle bin" },
+        "updatedAt": { "type": "string", "description": "Timestamp of last sync" }
+      }
+    },
+    "license_data": {
+      "title": "LicenseData",
+      "description": "Cloud and online license configuration and validity details",
+      "type": "object",
+      "properties": {
+        "licenseKey": { "type": "string", "description": "Unique license key format" },
+        "shopName": { "type": "string", "description": "Licensed shop name" },
+        "clientPhone": { "type": "string", "description": "Customer contact phone" },
+        "providerName": { "type": "string", "description": "Software provider name" },
+        "supportPhone": { "type": "string", "description": "Provider contact phone for renewals" },
+        "status": { "type": "string", "description": "License status: active, expired, suspended, or trial" },
+        "planName": { "type": "string", "description": "Subscription plan name" },
+        "activatedAt": { "type": "string", "description": "Activation ISO date" },
+        "expiresAt": { "type": "string", "description": "Expiration ISO date" },
+        "maxBranches": { "type": "number", "description": "Allowed number of branches" },
+        "lastCheckedAt": { "type": "string", "description": "Last online verification timestamp" },
+        "notes": { "type": "string", "description": "Additional license notes" }
+      }
+    },
+    "user_presence": {
+      "title": "UserPresence",
+      "description": "Real-time user online presence, active session and last online timestamp",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "User account ID" },
+        "userName": { "type": "string", "description": "Full name of the user" },
+        "role": { "type": "string", "description": "Role of the user (admin, manager, branch_manager)" },
+        "branchId": { "type": "string", "description": "Active branch identifier" },
+        "branchName": { "type": "string", "description": "Name of the branch" },
+        "isOnline": { "type": "boolean", "description": "Current online state" },
+        "lastActive": { "type": "string", "description": "ISO timestamp of last activity / heartbeat" },
+        "deviceInfo": { "type": "string", "description": "Device or browser client details" }
+      }
+    }
+  },
+  "firestore": {
+    "/shops/{shopId}": {
+      "schema": "app_data",
+      "description": "Store shop data partition"
+    },
+    "/system_license/{licenseId}": {
+      "schema": "license_data",
+      "description": "Master online cloud license document for software verification"
+    },
+    "/licenses/{licenseKey}": {
+      "schema": "license_data",
+      "description": "Registered license keys for key-based activation"
+    },
+    "/user_presence/{userId}": {
+      "schema": "user_presence",
+      "description": "Real-time online presence status for shop users"
+    }
+  }
+}

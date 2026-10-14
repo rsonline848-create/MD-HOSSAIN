@@ -1,0 +1,6 @@
+{
+  "name": "ML Electric (এম এল ইলেকট্রিক) - Shop Management & Accounting",
+  "description": "Complete Bengali Electrical Shop Management, POS Invoicing, Due Collection, Supplier Ledger, Daily Expenses, and Cash Reconciliation System.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

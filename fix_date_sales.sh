@@ -1,0 +1,2 @@
+#!/bin/bash
+sed -i 's/const toEnglishNumber(editSalesAmount.toString()) = toEnglishNumber(editSalesAmount.toString()); const toEnglishNumber(editDiscount.toString()) = toEnglishNumber(editDiscount.toString()); const toEnglishNumber(editCashPaid.toString()) = toEnglishNumber(editCashPaid.toString()); const toEnglishNumber(editOnlinePaid.toString()) = toEnglishNumber(editOnlinePaid.toString()); //g' src/components/DateSalesView.tsx
