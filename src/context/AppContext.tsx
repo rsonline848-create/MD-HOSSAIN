@@ -3,8 +3,10 @@ import {
   Customer, 
   Supplier, 
   Invoice, 
+  InvoiceItem,
   DuePaymentRecord, 
   SupplierBill, 
+  SupplierBillItem,
   SupplierPaymentRecord, 
   Expense, 
   OpeningCashRecord, 
@@ -18,15 +20,53 @@ import {
   SMTPSettings,
   TabType,
   AppLicense,
-  UserPresence
+  UserPresence,
+  AppLanguage,
+  Investment,
+  BankLoan,
+  LoanRepayment,
+  Employee,
+  EmployeePayment
 } from '../types';
 import { 
   INITIAL_CUSTOMERS, 
   INITIAL_SUPPLIERS, 
   INITIAL_PRODUCTS, 
-  INITIAL_USERS 
+  INITIAL_USERS,
+  DEFAULT_DEMO_PRODUCT_IDS
 } from '../data/initialData';
-import { getTodayDateInput, toBengaliNumber, normalizeDate, isSameDate } from '../utils/formatters';
+
+export const isDemoProduct = (p: any): boolean => {
+  if (!p) return false;
+  if (p.id && DEFAULT_DEMO_PRODUCT_IDS.includes(p.id)) return true;
+  if (typeof p.id === 'string' && /^p([1-9]|1[0-2])$/.test(p.id)) return true;
+  if (typeof p.name === 'string' && (
+    p.name.includes('BRB 1.5 RM') ||
+    p.name.includes('BRB 2.5 RM') ||
+    p.name.includes('BBS 1.0 RM') ||
+    p.name.includes('Super Star 18W') ||
+    p.name.includes('Super Star 12W') ||
+    p.name.includes('Click 1 Gang') ||
+    p.name.includes('Click Multi Socket') ||
+    p.name.includes('Havells 32A') ||
+    p.name.includes('Gazi 56 ইঞ্চি') ||
+    p.name.includes('BRB 3/4" ইঞ্চি') ||
+    p.name.includes('Royal 16A') ||
+    p.name.includes('ইলেকট্রিক ব্ল্যাক টেপ')
+  )) return true;
+  return false;
+};
+
+export const isDemoInvoice = (inv: any): boolean => {
+  if (!inv) return false;
+  if (typeof inv.id === 'string' && inv.id.startsWith('inv_demo')) return true;
+  if (inv.invoiceNo === 'INV-1001' || inv.invoiceNo === 'INV-1002') return true;
+  if (Array.isArray(inv.items) && inv.items.some((it: any) => isDemoProduct(it))) return true;
+  return false;
+};
+
+import { getTodayDateInput, toBengaliNumber, toEnglishNumber, normalizeDate, isSameDate, setFormatterLanguage, extractSupplierBillItems } from '../utils/formatters';
+import { getTranslation } from '../utils/translations';
 import { parseAndSanitizeBackup } from '../utils/backupParser';
 import { 
   getCachedLicense, 
@@ -47,6 +87,9 @@ import { doc, onSnapshot, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 
 interface AppContextType {
+  language: AppLanguage;
+  setLanguage: (lang: AppLanguage) => void;
+  t: (key: string, fallback?: string) => string;
   currentTab: TabType;
   setCurrentTab: (tab: TabType) => void;
   selectedDate: string;
@@ -58,6 +101,8 @@ interface AppContextType {
   activeBranchId: string;
   currentUser: UserAccount;
   setCurrentUser: (user: UserAccount) => void;
+  canEditOrDelete: boolean;
+  isManager: boolean;
   users: UserAccount[];
   setUsers: React.Dispatch<React.SetStateAction<UserAccount[]>>;
   addUser: (userData: {
@@ -104,20 +149,61 @@ interface AppContextType {
   emptyRecycleBin: () => void;
   products: ProductCatalogItem[];
   setProducts: React.Dispatch<React.SetStateAction<ProductCatalogItem[]>>;
+  addProduct: (product: ProductCatalogItem) => void;
+  updateProduct: (id: string, updated: Partial<ProductCatalogItem>) => void;
+  deleteProduct: (id: string) => void;
+
+  // Investments & Loans
+  investments: Investment[];
+  setInvestments: React.Dispatch<React.SetStateAction<Investment[]>>;
+  addInvestment: (investment: Omit<Investment, 'id' | 'createdAt'>) => void;
+  updateInvestment: (id: string, updated: Partial<Investment>) => void;
+  deleteInvestment: (id: string) => void;
+
+  loans: BankLoan[];
+  setLoans: React.Dispatch<React.SetStateAction<BankLoan[]>>;
+  addLoan: (loan: Omit<BankLoan, 'id' | 'createdAt'>) => void;
+  updateLoan: (id: string, updated: Partial<BankLoan>) => void;
+  deleteLoan: (id: string) => void;
+
+  loanRepayments: LoanRepayment[];
+  setLoanRepayments: React.Dispatch<React.SetStateAction<LoanRepayment[]>>;
+  addLoanRepayment: (repayment: Omit<LoanRepayment, 'id' | 'createdAt'>) => void;
+  updateLoanRepayment: (id: string, updated: Partial<LoanRepayment>) => void;
+  deleteLoanRepayment: (id: string) => void;
+
+  // Employees & Salary Management
+  employees: Employee[];
+  setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
+  addEmployee: (emp: Omit<Employee, 'id' | 'createdAt'>) => Employee;
+  updateEmployee: (id: string, updated: Partial<Employee>) => void;
+  deleteEmployee: (id: string) => void;
+
+  employeePayments: EmployeePayment[];
+  setEmployeePayments: React.Dispatch<React.SetStateAction<EmployeePayment[]>>;
+  addEmployeePayment: (payment: Omit<EmployeePayment, 'id' | 'createdAt' | 'paidBy' | 'expenseId'>) => EmployeePayment;
+  updateEmployeePayment: (id: string, updated: Partial<EmployeePayment>) => void;
+  deleteEmployeePayment: (id: string) => void;
 
   // Actions
   addCustomer: (customer: Customer) => void;
+  addSupplier: (supplier: Supplier) => void;
+  updateSupplier: (id: string, updated: Partial<Supplier>) => void;
   addInvoice: (invoice: Omit<Invoice, 'id' | 'createdAt' | 'createdBy'>) => Invoice;
+  updateInvoice: (invoiceId: string, updatedData: Partial<Invoice>, customItems?: InvoiceItem[]) => Invoice | undefined;
+  deleteInvoice: (idOrInvoice: string | Invoice) => void;
   addDuePayment: (payment: Omit<DuePaymentRecord, 'id' | 'createdAt' | 'collectedBy'>) => void;
   addSupplierBill: (bill: Omit<SupplierBill, 'id' | 'createdAt' | 'createdBy'>) => void;
+  deleteSupplierBill: (idOrBill: string | SupplierBill) => void;
+  updateSupplierBill: (billId: string, updatedBillData: Partial<SupplierBill>, customItems?: SupplierBillItem[]) => void;
   addSupplierPayment: (payment: Omit<SupplierPaymentRecord, 'id' | 'createdAt' | 'paidBy'>) => void;
   addExpense: (expense: Omit<Expense, 'id' | 'createdAt' | 'createdBy'>) => void;
   setOpeningCash: (amount: number, note?: string) => void;
   addOtherCashIn: (entry: Omit<OtherCashInRecord, 'id' | 'createdAt' | 'receivedBy'>) => void;
   saveCashTally: (tally: Omit<CashTallyRecord, 'id' | 'savedBy' | 'savedAt'>) => void;
   resetAllData: () => void;
-  exportBackupJson: () => Promise<void>;
-  generateBackupJsonString: () => string;
+  exportBackupJson: (selectedKeys?: string[]) => Promise<void>;
+  generateBackupJsonString: (selectedKeys?: string[]) => string;
   importBackupJson: (jsonData: string, mode?: 'overwrite' | 'merge') => Promise<{ success: boolean; message: string }>;
 
   // Active Modals state
@@ -127,6 +213,8 @@ interface AppContextType {
   duePaymentToPrint: DuePaymentRecord | null;
   setDuePaymentToPrint: (dp: DuePaymentRecord | null) => void;
   setInvoiceToPrint: (inv: Invoice | null) => void;
+  invoiceToEdit: Invoice | null;
+  setInvoiceToEdit: (inv: Invoice | null) => void;
 
   // Cloud Sync status & manual sync
   isCloudSynced: boolean;
@@ -167,14 +255,59 @@ interface AppContextType {
   activeOnlineUsersCount: number;
   isOnlineUsersModalOpen: boolean;
   setIsOnlineUsersModalOpen: (open: boolean) => void;
+
+  // Custom in-app Confirmation Dialog (Works 100% reliably in iframes, webviews & standalone)
+  confirmDialog: ConfirmDialogOptions | null;
+  setConfirmDialog: (dialog: ConfirmDialogOptions | null) => void;
+  confirmAction: (options: ConfirmDialogOptions) => void;
+}
+
+export interface ConfirmDialogOptions {
+  title?: string;
+  message: string;
+  confirmLabel?: string;
+  confirmText?: string;
+  cancelLabel?: string;
+  cancelText?: string;
+  isDestructive?: boolean;
+  onConfirm: () => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
 
-const ACTIVE_BRANCH_ID = typeof window !== "undefined" ? localStorage.getItem("ACTIVE_BRANCH_ID") || "ml_electric_main" : "ml_electric_main";
-const FIRESTORE_SHOP_DOC_ID = ACTIVE_BRANCH_ID;
-const STORAGE_KEY_PREFIX = `ML_ELECTRIC_${ACTIVE_BRANCH_ID}_`;
+const getInitialActiveBranchId = (): string => {
+  if (typeof window === "undefined") return "bismillah_traders_main";
+  const saved = localStorage.getItem("ACTIVE_BRANCH_ID");
+  if (!saved || saved === "ml_electric_main") {
+    localStorage.setItem("ACTIVE_BRANCH_ID", "bismillah_traders_main");
+    return "bismillah_traders_main";
+  }
+  return saved;
+};
 
+const ACTIVE_BRANCH_ID = getInitialActiveBranchId();
+const FIRESTORE_SHOP_DOC_ID = ACTIVE_BRANCH_ID;
+const STORAGE_KEY_PREFIX = `BISMILLAH_${ACTIVE_BRANCH_ID}_`;
+
+// Auto-migrate legacy ML_ELECTRIC keys to BISMILLAH prefix if empty
+if (typeof window !== 'undefined') {
+  const legacyPrefix = `ML_ELECTRIC_${ACTIVE_BRANCH_ID}_`;
+  const oldMainPrefix = `ML_ELECTRIC_ml_electric_main_`;
+  const keysToMigrate = [
+    'USERS', 'CUSTOMERS', 'SUPPLIERS', 'PRODUCTS', 'INVOICES',
+    'DUE_PAYMENTS', 'SUPPLIER_BILLS', 'SUPPLIER_PAYMENTS', 'EXPENSES',
+    'OPENING_CASH', 'OTHER_CASH_IN', 'CASH_TALLIES', 'INVESTMENTS',
+    'LOANS', 'LOAN_REPAYMENTS', 'AUDIT_LOGS', 'RECYCLE_BIN', 'SMTP'
+  ];
+  keysToMigrate.forEach(k => {
+    if (!localStorage.getItem(STORAGE_KEY_PREFIX + k)) {
+      const oldVal = localStorage.getItem(legacyPrefix + k) || localStorage.getItem(oldMainPrefix + k);
+      if (oldVal) {
+        localStorage.setItem(STORAGE_KEY_PREFIX + k, oldVal);
+      }
+    }
+  });
+}
 
 // Unique client/session identifier to distinguish remote updates vs local writes
 const CLIENT_ID = typeof window !== 'undefined'
@@ -186,6 +319,31 @@ const CLIENT_ID = typeof window !== 'undefined'
   : 'client_node';
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Language State: 'bn' (Bengali) | 'en' (English)
+  const [language, setLanguageState] = useState<AppLanguage>(() => {
+    try {
+      const saved = localStorage.getItem('ML_ELECTRIC_LANGUAGE');
+      if (saved === 'en' || saved === 'bn') return saved;
+    } catch {}
+    return 'bn';
+  });
+
+  const setLanguage = (lang: AppLanguage) => {
+    setLanguageState(lang);
+    setFormatterLanguage(lang);
+    try {
+      localStorage.setItem('ML_ELECTRIC_LANGUAGE', lang);
+    } catch {}
+  };
+
+  useEffect(() => {
+    setFormatterLanguage(language);
+  }, [language]);
+
+  const t = (key: string, fallback?: string): string => {
+    return getTranslation(key, language, fallback);
+  };
+
   const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDateInput());
   
@@ -193,6 +351,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [invoiceToPrint, setInvoiceToPrint] = useState<Invoice | null>(null);
   const [duePaymentToPrint, setDuePaymentToPrint] = useState<DuePaymentRecord | null>(null);
+  const [invoiceToEdit, setInvoiceToEdit] = useState<Invoice | null>(null);
+
+  // Custom In-App Confirmation Dialog State (Solves iframe native confirm() blocking)
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogOptions | null>(null);
+  const confirmAction = (options: ConfirmDialogOptions) => {
+    setConfirmDialog(options);
+  };
 
   // Cloud Sync indicators & Quota Usage
   const [isCloudSynced, setIsCloudSynced] = useState<boolean>(true);
@@ -303,14 +468,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [branches]);
 
   const [currentUser, setCurrentUser] = useState<UserAccount>(() => {
-    const savedUserData = sessionStorage.getItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_DATA');
+    const savedUserData = 
+      sessionStorage.getItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_DATA') ||
+      sessionStorage.getItem('CURRENT_USER_DATA') ||
+      sessionStorage.getItem('ML_ELECTRIC_CURRENT_USER_DATA') ||
+      sessionStorage.getItem('ML_ELECTRIC_ml_electric_main_CURRENT_USER_DATA') ||
+      sessionStorage.getItem('ML_ELECTRIC_bismillah_traders_main_CURRENT_USER_DATA');
     if (savedUserData) {
       try {
         const parsed = JSON.parse(savedUserData);
         if (parsed && parsed.id) return parsed;
       } catch {}
     }
-    const savedUserId = sessionStorage.getItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID');
+    const savedUserId = 
+      sessionStorage.getItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID') ||
+      sessionStorage.getItem('CURRENT_USER_ID') ||
+      sessionStorage.getItem('ML_ELECTRIC_CURRENT_USER_ID') ||
+      sessionStorage.getItem('ML_ELECTRIC_ml_electric_main_CURRENT_USER_ID') ||
+      sessionStorage.getItem('ML_ELECTRIC_bismillah_traders_main_CURRENT_USER_ID');
     if (savedUserId) {
       const found = users.find(u => u.id === savedUserId);
       if (found) return found;
@@ -318,24 +493,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return users[0] || INITIAL_USERS[0];
   });
 
+  const isManager = currentUser?.role === 'manager';
+  const canEditOrDelete = Boolean(currentUser && (currentUser.role === 'admin' || currentUser.role === 'branch_manager'));
+
   // Ensure currentUser is correctly set when users are loaded from cloud
   useEffect(() => {
-    const savedUserId = sessionStorage.getItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID');
+    const savedUserId = 
+      sessionStorage.getItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID') ||
+      sessionStorage.getItem('ML_ELECTRIC_CURRENT_USER_ID');
     if (savedUserId && currentUser.id !== savedUserId) {
       const found = users.find(u => u.id === savedUserId);
       if (found) {
         setCurrentUser(found);
-      } else if (users.length > 1) { // If users have loaded from cloud and user is still not found
-        sessionStorage.removeItem(STORAGE_KEY_PREFIX + 'AUTH');
-        sessionStorage.removeItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID');
-        sessionStorage.removeItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_DATA');
-        window.location.reload();
       }
     }
   }, [users, currentUser.id]);
+
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    const authSaved = sessionStorage.getItem(STORAGE_KEY_PREFIX + 'AUTH');
-    return authSaved ? JSON.parse(authSaved) : false;
+    const authSaved = 
+      sessionStorage.getItem(STORAGE_KEY_PREFIX + 'AUTH') ||
+      sessionStorage.getItem('IS_AUTHENTICATED') ||
+      sessionStorage.getItem('ML_ELECTRIC_AUTH') ||
+      sessionStorage.getItem('ML_ELECTRIC_ml_electric_main_AUTH') ||
+      sessionStorage.getItem('ML_ELECTRIC_bismillah_traders_main_AUTH');
+    return authSaved ? JSON.parse(authSaved) === true : false;
   });
 
   const [smtpSettings, setSmtpSettings] = useState<SMTPSettings | null>(() => {
@@ -428,25 +609,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
+    const persistLoginSession = (user: UserAccount) => {
+      setCurrentUser(user);
+      setIsAuthenticated(true);
+      // Persist to all key formats so every hook and reload lookup succeeds
+      sessionStorage.setItem(STORAGE_KEY_PREFIX + 'AUTH', JSON.stringify(true));
+      sessionStorage.setItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID', user.id);
+      sessionStorage.setItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_DATA', JSON.stringify(user));
+      sessionStorage.setItem('IS_AUTHENTICATED', JSON.stringify(true));
+      sessionStorage.setItem('CURRENT_USER_ID', user.id);
+      sessionStorage.setItem('CURRENT_USER_DATA', JSON.stringify(user));
+      sessionStorage.setItem('ML_ELECTRIC_AUTH', JSON.stringify(true));
+      sessionStorage.setItem('ML_ELECTRIC_CURRENT_USER_ID', user.id);
+      sessionStorage.setItem('ML_ELECTRIC_CURRENT_USER_DATA', JSON.stringify(user));
+      sessionStorage.setItem('ML_ELECTRIC_ml_electric_main_AUTH', JSON.stringify(true));
+      sessionStorage.setItem('ML_ELECTRIC_ml_electric_main_CURRENT_USER_ID', user.id);
+      sessionStorage.setItem('ML_ELECTRIC_ml_electric_main_CURRENT_USER_DATA', JSON.stringify(user));
+      sessionStorage.setItem('ML_ELECTRIC_bismillah_traders_main_AUTH', JSON.stringify(true));
+      sessionStorage.setItem('ML_ELECTRIC_bismillah_traders_main_CURRENT_USER_ID', user.id);
+      sessionStorage.setItem('ML_ELECTRIC_bismillah_traders_main_CURRENT_USER_DATA', JSON.stringify(user));
+    };
+
     if (!foundUser) {
-      // Emergency Master Admin bypass (Only official master password 102267, 139210 removed completely)
+      // Emergency Master Admin bypass (Only official master password 102267)
       if ((normInputUser === 'admin' || normInputUser === 'administrator') && normInputPass === '102267') {
         const adminUser = users.find(u => u.role === 'admin') || INITIAL_USERS[0];
-        
-        if (ACTIVE_BRANCH_ID !== 'ml_electric_main') {
-          localStorage.removeItem('ACTIVE_BRANCH_ID');
-          sessionStorage.setItem(`ML_ELECTRIC_ml_electric_main_AUTH`, JSON.stringify(true));
-          sessionStorage.setItem(`ML_ELECTRIC_ml_electric_main_CURRENT_USER_ID`, adminUser.id);
-          sessionStorage.setItem(`ML_ELECTRIC_ml_electric_main_CURRENT_USER_DATA`, JSON.stringify(adminUser));
-          window.location.reload();
-          return { success: true };
-        }
-
-        setCurrentUser(adminUser);
-        setIsAuthenticated(true);
-        sessionStorage.setItem(STORAGE_KEY_PREFIX + 'AUTH', JSON.stringify(true));
-        sessionStorage.setItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID', adminUser.id);
-        sessionStorage.setItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_DATA', JSON.stringify(adminUser));
+        persistLoginSession(adminUser);
         return { success: true };
       }
 
@@ -459,43 +647,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, message: 'ভুল ইউজারনেম অথবা মোবাইল নম্বর! এই অ্যাকাউন্টটি পাওয়া যায়নি।' };
     }
 
-    // Save found user to local caches to prevent sync lag
-    try {
-      const targetPrefix = `ML_ELECTRIC_${foundUser.branchId || 'ml_electric_main'}_`;
-      localStorage.setItem(targetPrefix + 'CURRENT_USER_DATA', JSON.stringify(foundUser));
-    } catch {}
-
-    // Determine which branch this user belongs to
-    const targetBranchId = (foundUser.role === 'admin')
-      ? (foundUser.branchId || 'ml_electric_main')
-      : (foundUser.branchId || 'ml_electric_main');
-
-    if (targetBranchId && ACTIVE_BRANCH_ID !== targetBranchId) {
-      if (targetBranchId === 'ml_electric_main') {
-        localStorage.removeItem('ACTIVE_BRANCH_ID');
-      } else {
-        localStorage.setItem('ACTIVE_BRANCH_ID', targetBranchId);
-      }
-      sessionStorage.setItem(`ML_ELECTRIC_${targetBranchId}_AUTH`, JSON.stringify(true));
-      sessionStorage.setItem(`ML_ELECTRIC_${targetBranchId}_CURRENT_USER_ID`, foundUser.id);
-      sessionStorage.setItem(`ML_ELECTRIC_${targetBranchId}_CURRENT_USER_DATA`, JSON.stringify(foundUser));
-      window.location.reload();
-      return { success: true };
-    }
-
-    setCurrentUser(foundUser);
-    setIsAuthenticated(true);
-    sessionStorage.setItem(STORAGE_KEY_PREFIX + 'AUTH', JSON.stringify(true));
-    sessionStorage.setItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID', foundUser.id);
-    sessionStorage.setItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_DATA', JSON.stringify(foundUser));
+    // Save found user to local caches and activate session
+    persistLoginSession(foundUser);
     return { success: true };
   };
 
   const returnToMainApp = () => {
-    localStorage.removeItem("ACTIVE_BRANCH_ID");
-    // Ensure active session is preserved when returning to main branch
+    localStorage.setItem("ACTIVE_BRANCH_ID", "bismillah_traders_main");
+    sessionStorage.setItem(STORAGE_KEY_PREFIX + 'AUTH', JSON.stringify(true));
+    sessionStorage.setItem('IS_AUTHENTICATED', JSON.stringify(true));
     sessionStorage.setItem("ML_ELECTRIC_ml_electric_main_AUTH", JSON.stringify(true));
     if (currentUser) {
+      sessionStorage.setItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID', currentUser.id);
+      sessionStorage.setItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_DATA', JSON.stringify(currentUser));
       sessionStorage.setItem("ML_ELECTRIC_ml_electric_main_CURRENT_USER_ID", currentUser.id);
       sessionStorage.setItem("ML_ELECTRIC_ml_electric_main_CURRENT_USER_DATA", JSON.stringify(currentUser));
     }
@@ -508,7 +672,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     setIsAuthenticated(false);
     sessionStorage.setItem(STORAGE_KEY_PREFIX + 'AUTH', JSON.stringify(false));
+    sessionStorage.setItem('IS_AUTHENTICATED', JSON.stringify(false));
+    sessionStorage.setItem('ML_ELECTRIC_AUTH', JSON.stringify(false));
+    sessionStorage.setItem('ML_ELECTRIC_ml_electric_main_AUTH', JSON.stringify(false));
     sessionStorage.removeItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_ID');
+    sessionStorage.removeItem(STORAGE_KEY_PREFIX + 'CURRENT_USER_DATA');
+    sessionStorage.removeItem('CURRENT_USER_ID');
+    sessionStorage.removeItem('CURRENT_USER_DATA');
+    sessionStorage.removeItem('ML_ELECTRIC_CURRENT_USER_ID');
+    sessionStorage.removeItem('ML_ELECTRIC_CURRENT_USER_DATA');
     setActiveModal(null);
   };
 
@@ -527,13 +699,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Products
   const [products, setProducts] = useState<ProductCatalogItem[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'PRODUCTS');
-    return saved !== null ? JSON.parse(saved) : INITIAL_PRODUCTS;
+    if (saved !== null) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(p => !isDemoProduct(p));
+        }
+      } catch {}
+    }
+    return INITIAL_PRODUCTS;
   });
 
   // Invoices
   const [invoices, setInvoices] = useState<Invoice[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'INVOICES');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(inv => !isDemoInvoice(inv));
+        }
+      } catch {}
+    }
+    return [];
   });
 
   // Due Payments
@@ -578,6 +766,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return saved ? JSON.parse(saved) : [];
   });
 
+  // Investments
+  const [investments, setInvestments] = useState<Investment[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'INVESTMENTS');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Bank Loans
+  const [loans, setLoans] = useState<BankLoan[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'LOANS');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Loan Repayments
+  const [loanRepayments, setLoanRepayments] = useState<LoanRepayment[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'LOAN_REPAYMENTS');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Employees & Staff Profiles
+  const [employees, setEmployees] = useState<Employee[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'EMPLOYEES');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Employee Salary Disbursements & Advances
+  const [employeePayments, setEmployeePayments] = useState<EmployeePayment[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'EMPLOYEE_PAYMENTS');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   // Audit Logs
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'AUDIT_LOGS');
@@ -587,19 +805,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Recycle Bin
   const [recycleBin, setRecycleBin] = useState<RecycleBinItem[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'RECYCLE_BIN');
-    if (saved) return JSON.parse(saved);
-    return [
-      {
-        id: 'rec_demo_1',
-        type: 'invoice',
-        name: 'ইনভয়েস #INV-1002 (পুরনো ড্রাফট)',
-        amount: 850,
-        date: getTodayDateInput(),
-        deletedAt: new Date().toISOString(),
-        deletedBy: 'Admin',
-        originalData: { invoiceNo: 'INV-1002', grandTotal: 850 }
-      }
-    ];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((r: any) => r.id !== 'rec_demo_1' && !isDemoInvoice(r.originalData));
+        }
+      } catch {}
+    }
+    return [];
   });
 
   // Online Cloud License Management State
@@ -692,11 +906,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Compute active online users count
   const activeOnlineUsersCount = useMemo(() => {
     const onlineIds = new Set<string>();
-    presenceList.forEach(p => {
-      if (p.isOnline && isPresenceOnline(p)) {
-        onlineIds.add(p.userId);
-      }
-    });
+    if (Array.isArray(presenceList)) {
+      presenceList.forEach(p => {
+        if (p && p.isOnline && isPresenceOnline(p) && p.userId) {
+          onlineIds.add(p.userId);
+        }
+      });
+    }
     if (isAuthenticated && currentUser?.id) {
       onlineIds.add(currentUser.id);
     }
@@ -734,6 +950,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   auditLogsRef.current = auditLogs;
   const recycleBinRef = useRef(recycleBin);
   recycleBinRef.current = recycleBin;
+  const investmentsRef = useRef(investments);
+  investmentsRef.current = investments;
+  const loansRef = useRef(loans);
+  loansRef.current = loans;
+  const loanRepaymentsRef = useRef(loanRepayments);
+  loanRepaymentsRef.current = loanRepayments;
+  const employeesRef = useRef(employees);
+  employeesRef.current = employees;
+  const employeePaymentsRef = useRef(employeePayments);
+  employeePaymentsRef.current = employeePayments;
 
   // Save to LocalStorage on changes
   useEffect(() => {
@@ -792,6 +1018,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem(STORAGE_KEY_PREFIX + 'RECYCLE_BIN', JSON.stringify(recycleBin));
   }, [recycleBin]);
 
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'INVESTMENTS', JSON.stringify(investments));
+  }, [investments]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'LOANS', JSON.stringify(loans));
+  }, [loans]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'LOAN_REPAYMENTS', JSON.stringify(loanRepayments));
+  }, [loanRepayments]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEES', JSON.stringify(employees));
+  }, [employees]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEE_PAYMENTS', JSON.stringify(employeePayments));
+  }, [employeePayments]);
+
+  // One-time startup check: purge any demo products or demo invoices from storage and cloud
+  useEffect(() => {
+    const rawProds = productsRef.current;
+    const rawInvs = invoicesRef.current;
+    const hasDemoProds = Array.isArray(rawProds) && rawProds.some(p => isDemoProduct(p));
+    const hasDemoInvs = Array.isArray(rawInvs) && rawInvs.some(inv => isDemoInvoice(inv));
+
+    if (hasDemoProds || hasDemoInvs) {
+      const cleanedP = rawProds.filter(p => !isDemoProduct(p));
+      const cleanedI = rawInvs.filter(inv => !isDemoInvoice(inv));
+      setProducts(cleanedP);
+      productsRef.current = cleanedP;
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(cleanedP));
+      setInvoices(cleanedI);
+      invoicesRef.current = cleanedI;
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'INVOICES', JSON.stringify(cleanedI));
+      pushDataToCloud({ products: cleanedP, invoices: cleanedI });
+    }
+  }, []);
+
   // =========================================================================
   // CORE CLOUD SYNC ENGINE: INSTANT BROADCAST & REAL-TIME LISTENER
   // =========================================================================
@@ -814,6 +1080,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     smtpSettings?: SMTPSettings | null;
     auditLogs?: AuditLog[];
     recycleBin?: RecycleBinItem[];
+    investments?: Investment[];
+    loans?: BankLoan[];
+    loanRepayments?: LoanRepayment[];
+    employees?: Employee[];
+    employeePayments?: EmployeePayment[];
   }) => {
     try {
       setIsSyncingNow(true);
@@ -834,6 +1105,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         smtpSettings: override?.smtpSettings ?? smtpSettingsRef.current,
         auditLogs: override?.auditLogs ?? auditLogsRef.current,
         recycleBin: override?.recycleBin ?? recycleBinRef.current,
+        investments: override?.investments ?? investmentsRef.current,
+        loans: override?.loans ?? loansRef.current,
+        loanRepayments: override?.loanRepayments ?? loanRepaymentsRef.current,
+        employees: override?.employees ?? employeesRef.current,
+        employeePayments: override?.employeePayments ?? employeePaymentsRef.current,
         lastUpdatedBy: CLIENT_ID,
         updatedAt: new Date().toISOString()
       };
@@ -873,12 +1149,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIERS', JSON.stringify(cloudData.suppliers));
     }
     if (Array.isArray(cloudData.products)) {
-      setProducts(cloudData.products);
-      localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(cloudData.products));
+      const cleanProducts = cloudData.products.filter((p: any) => !isDemoProduct(p));
+      setProducts(cleanProducts);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(cleanProducts));
     }
     if (Array.isArray(cloudData.invoices)) {
-      setInvoices(cloudData.invoices);
-      localStorage.setItem(STORAGE_KEY_PREFIX + 'INVOICES', JSON.stringify(cloudData.invoices));
+      const cleanInvoices = cloudData.invoices.filter((inv: any) => !isDemoInvoice(inv));
+      setInvoices(cleanInvoices);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'INVOICES', JSON.stringify(cleanInvoices));
     }
     if (Array.isArray(cloudData.duePayments)) {
       setDuePayments(cloudData.duePayments);
@@ -907,6 +1185,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (Array.isArray(cloudData.cashTallies)) {
       setCashTallies(cloudData.cashTallies);
       localStorage.setItem(STORAGE_KEY_PREFIX + 'CASH_TALLIES', JSON.stringify(cloudData.cashTallies));
+    }
+    if (Array.isArray(cloudData.investments)) {
+      setInvestments(cloudData.investments);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'INVESTMENTS', JSON.stringify(cloudData.investments));
+    }
+    if (Array.isArray(cloudData.loans)) {
+      setLoans(cloudData.loans);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'LOANS', JSON.stringify(cloudData.loans));
+    }
+    if (Array.isArray(cloudData.loanRepayments)) {
+      setLoanRepayments(cloudData.loanRepayments);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'LOAN_REPAYMENTS', JSON.stringify(cloudData.loanRepayments));
+    }
+    if (Array.isArray(cloudData.employees)) {
+      setEmployees(cloudData.employees);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEES', JSON.stringify(cloudData.employees));
+    }
+    if (Array.isArray(cloudData.employeePayments)) {
+      setEmployeePayments(cloudData.employeePayments);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEE_PAYMENTS', JSON.stringify(cloudData.employeePayments));
     }
     if (cloudData.smtpSettings) {
       setSmtpSettings(cloudData.smtpSettings);
@@ -937,8 +1235,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       localStorage.setItem(STORAGE_KEY_PREFIX + 'AUDIT_LOGS', JSON.stringify(cloudData.auditLogs));
     }
     if (Array.isArray(cloudData.recycleBin)) {
-      setRecycleBin(cloudData.recycleBin);
-      localStorage.setItem(STORAGE_KEY_PREFIX + 'RECYCLE_BIN', JSON.stringify(cloudData.recycleBin));
+      const cleanRecycleBin = cloudData.recycleBin.filter((r: any) => r.id !== 'rec_demo_1' && !isDemoInvoice(r.originalData));
+      setRecycleBin(cleanRecycleBin);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'RECYCLE_BIN', JSON.stringify(cleanRecycleBin));
     }
     if (Array.isArray(cloudData.branches) && cloudData.branches.length > 0) {
       setBranches(cloudData.branches);
@@ -1184,6 +1483,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateBranch = async (updatedBranch: Branch): Promise<void> => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে শাখা এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
     const nextBranches = branchesRef.current.map(b => b.id === updatedBranch.id ? updatedBranch : b);
     setBranches(nextBranches);
     branchesRef.current = nextBranches;
@@ -1194,6 +1497,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteBranch = async (branchId: string): Promise<void> => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে শাখা ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
     const nextBranches = branchesRef.current.filter(b => b.id !== branchId);
     setBranches(nextBranches);
     branchesRef.current = nextBranches;
@@ -1278,6 +1585,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateUser = async (updatedUser: UserAccount): Promise<void> => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে ব্যবহারকারী তথ্য এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
     const branchObj = branchesRef.current.find(b => b.id === updatedUser.branchId);
     const userToSave: UserAccount = {
       ...updatedUser,
@@ -1313,6 +1624,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deleteUser = async (userId: string): Promise<void> => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে ব্যবহারকারী মুছে ফেলার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
     const userToDelete = usersRef.current.find(u => u.id === userId);
     const nextUsers = usersRef.current.filter(u => u.id !== userId);
     setUsers(nextUsers);
@@ -1355,6 +1670,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const moveToRecycleBin = (type: RecycleBinItem['type'], name: string, data: unknown, amount?: number) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো রেকর্ড ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
     const item: RecycleBinItem = {
       id: 'rec_' + Date.now(),
       type,
@@ -1367,6 +1686,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     const nextBin = [item, ...recycleBinRef.current];
     setRecycleBin(nextBin);
+    recycleBinRef.current = nextBin;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'RECYCLE_BIN', JSON.stringify(nextBin));
     const newLog: AuditLog = {
       id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       category: 'সিস্টেম',
@@ -1383,22 +1704,127 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const restoreFromRecycleBin = (id: string) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে রিসাইকেল বিনের রেকর্ড রিস্টোর করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
     const item = recycleBinRef.current.find(r => r.id === id);
     if (!item) return;
     
     const nextBin = recycleBinRef.current.filter(r => r.id !== id);
     setRecycleBin(nextBin);
+    recycleBinRef.current = nextBin;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'RECYCLE_BIN', JSON.stringify(nextBin));
 
     let nextInvoices = invoicesRef.current;
     let nextCustomers = customersRef.current;
     let nextSuppliers = suppliersRef.current;
     let nextExpenses = expensesRef.current;
     let nextDuePayments = duePaymentsRef.current;
+    let nextSupplierBills = supplierBillsRef.current;
 
     // Restore based on type
     if (item.type === 'invoice') {
-      nextInvoices = [item.originalData as Invoice, ...nextInvoices];
+      const restoredInv = item.originalData as Invoice;
+      nextInvoices = [restoredInv, ...nextInvoices];
       setInvoices(nextInvoices);
+      invoicesRef.current = nextInvoices;
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'INVOICES', JSON.stringify(nextInvoices));
+
+      // Re-deduct product stock
+      let nextProducts = [...productsRef.current];
+      if (Array.isArray(restoredInv.items) && restoredInv.items.length > 0) {
+        restoredInv.items.forEach(invItem => {
+          const qty = Number(invItem.quantity) || 0;
+          if (qty <= 0) return;
+          const isExchangeReturn = invItem.category === 'এক্সচেঞ্জ ফেরত' || invItem.name?.startsWith('[ফেরত মাল]');
+          const prodIdx = nextProducts.findIndex(p => {
+            if (invItem.productId && p.id === invItem.productId) return true;
+            const clean = (invItem.name || '').replace(/^\[(নতুন মাল|ফেরত মাল)\]\s*/, '').trim().toLowerCase();
+            return p.name.trim().toLowerCase() === clean || (invItem.code && p.code === invItem.code) || p.id === invItem.id;
+          });
+          if (prodIdx !== -1) {
+            const curStock = Number(nextProducts[prodIdx].stock) || 0;
+            const updatedStock = isExchangeReturn ? curStock + qty : curStock - qty;
+            nextProducts[prodIdx] = {
+              ...nextProducts[prodIdx],
+              stock: Math.round(updatedStock * 100) / 100,
+              updatedAt: new Date().toISOString()
+            };
+          }
+        });
+        productsRef.current = nextProducts;
+        setProducts(nextProducts);
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(nextProducts));
+      }
+
+      // Re-apply customer balance
+      if (restoredInv.customerId) {
+        const revertPurchased = restoredInv.grandTotal || 0;
+        const revertPaid = (restoredInv.cashPaid || 0) + (restoredInv.onlinePaid || 0);
+        const revertDue = restoredInv.dueAmount !== undefined ? restoredInv.dueAmount : (revertPurchased - revertPaid);
+        nextCustomers = customersRef.current.map(c => {
+          if (c.id === restoredInv.customerId) {
+            return {
+              ...c,
+              totalPurchased: (c.totalPurchased || 0) + revertPurchased,
+              totalPaid: (c.totalPaid || 0) + revertPaid,
+              currentDue: (c.currentDue || 0) + revertDue,
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return c;
+        });
+        customersRef.current = nextCustomers;
+        setCustomers(nextCustomers);
+        localStorage.setItem(STORAGE_KEY_PREFIX + 'CUSTOMERS', JSON.stringify(nextCustomers));
+      }
+    } else if (item.type === 'supplier_bill') {
+      const restoredBill = item.originalData as SupplierBill;
+      nextSupplierBills = [restoredBill, ...nextSupplierBills];
+      setSupplierBills(nextSupplierBills);
+      supplierBillsRef.current = nextSupplierBills;
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIER_BILLS', JSON.stringify(nextSupplierBills));
+
+      // Re-apply supplier accounts
+      nextSuppliers = suppliersRef.current.map(s => {
+        if (s.id === restoredBill.supplierId) {
+          return {
+            ...s,
+            totalPurchased: (s.totalPurchased || 0) + (Number(restoredBill.totalAmount) || 0),
+            totalPaid: (s.totalPaid || 0) + ((Number(restoredBill.cashPaid) || 0) + (Number(restoredBill.onlinePaid) || 0)),
+            currentPayable: (s.currentPayable || 0) + (Number(restoredBill.dueAmount) || 0)
+          };
+        }
+        return s;
+      });
+      suppliersRef.current = nextSuppliers;
+      setSuppliers(nextSuppliers);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIERS', JSON.stringify(nextSuppliers));
+
+      // Re-add product stock (+)
+      let nextProducts = [...productsRef.current];
+      const itemsToRestore = extractSupplierBillItems(restoredBill);
+
+      itemsToRestore.forEach(it => {
+        const qty = Number(it.quantity) || 0;
+        if (qty <= 0) return;
+        const prodIndex = nextProducts.findIndex(p => {
+          if (it.productId && p.id === it.productId) return true;
+          return p.name.trim().toLowerCase() === it.name.trim().toLowerCase();
+        });
+        if (prodIndex !== -1) {
+          const curStock = Number(nextProducts[prodIndex].stock) || 0;
+          nextProducts[prodIndex] = {
+            ...nextProducts[prodIndex],
+            stock: Math.round((curStock + qty) * 100) / 100,
+            updatedAt: new Date().toISOString()
+          };
+        }
+      });
+      productsRef.current = nextProducts;
+      setProducts(nextProducts);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(nextProducts));
     } else if (item.type === 'customer') {
       nextCustomers = [item.originalData as Customer, ...nextCustomers];
       setCustomers(nextCustomers);
@@ -1411,6 +1837,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } else if (item.type === 'due_payment') {
       nextDuePayments = [item.originalData as DuePaymentRecord, ...nextDuePayments];
       setDuePayments(nextDuePayments);
+    } else if (item.type === 'investment') {
+      const nextInv = [item.originalData as Investment, ...investmentsRef.current];
+      setInvestments(nextInv);
+      investmentsRef.current = nextInv;
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'INVESTMENTS', JSON.stringify(nextInv));
+    } else if (item.type === 'loan') {
+      const nextLoans = [item.originalData as BankLoan, ...loansRef.current];
+      setLoans(nextLoans);
+      loansRef.current = nextLoans;
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'LOANS', JSON.stringify(nextLoans));
+    } else if (item.type === 'loan_repayment') {
+      const nextReps = [item.originalData as LoanRepayment, ...loanRepaymentsRef.current];
+      setLoanRepayments(nextReps);
+      loanRepaymentsRef.current = nextReps;
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'LOAN_REPAYMENTS', JSON.stringify(nextReps));
     }
 
     const newLog: AuditLog = {
@@ -1429,9 +1870,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       recycleBin: nextBin,
       invoices: nextInvoices,
       customers: nextCustomers,
+      products: productsRef.current,
       suppliers: nextSuppliers,
+      supplierBills: nextSupplierBills,
       expenses: nextExpenses,
       duePayments: nextDuePayments,
+      investments: investmentsRef.current,
+      loans: loansRef.current,
+      loanRepayments: loanRepaymentsRef.current,
       auditLogs: nextLogs
     });
   };
@@ -1477,19 +1923,109 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     pushDataToCloud({ recycleBin: [], auditLogs: nextLogs });
   };
 
+  // Products & Stock Management with Instant Cloud Persistence
+  const addProduct = (product: ProductCatalogItem) => {
+    const nextProducts = [product, ...productsRef.current];
+    setProducts(nextProducts);
+    productsRef.current = nextProducts;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(nextProducts));
+    pushDataToCloud({ products: nextProducts });
+
+    addAuditLog('সিস্টেম', 'নতুন পণ্য', `পণ্য যুক্ত করা হয়েছে: ${product.name} (কোড: ${product.code || 'N/A'}, স্টক: ${product.stock} ${product.unit || 'KG'})`);
+  };
+
+  const updateProduct = (id: string, updated: Partial<ProductCatalogItem>) => {
+    if (currentUser?.role === 'manager' && (updated.name !== undefined || updated.salePrice !== undefined || updated.purchasePrice !== undefined || updated.code !== undefined)) {
+      alert('ম্যানেজার একাউন্ট থেকে প্রোডাক্ট এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const nextProducts = productsRef.current.map(p => p.id === id ? { ...p, ...updated, updatedAt: new Date().toISOString() } : p);
+    setProducts(nextProducts);
+    productsRef.current = nextProducts;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(nextProducts));
+    pushDataToCloud({ products: nextProducts });
+  };
+
+  const deleteProduct = (id: string) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে প্রোডাক্ট ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const target = productsRef.current.find(p => p.id === id);
+    const nextProducts = productsRef.current.filter(p => p.id !== id);
+    setProducts(nextProducts);
+    productsRef.current = nextProducts;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(nextProducts));
+    pushDataToCloud({ products: nextProducts });
+
+    if (target) {
+      addAuditLog('সিস্টেম', 'পণ্য মুছে ফেলা', `পণ্য মুছে ফেলা হয়েছে: ${target.name} (কোড: ${target.code || 'N/A'})`);
+    }
+  };
+
   // Add Invoice & Update Customer due with Instant Cloud Broadcast
   const addCustomer = (customer: Customer) => {
     const nextCustomers = [customer, ...customersRef.current];
     customersRef.current = nextCustomers;
     setCustomers(nextCustomers);
-    customersRef.current = nextCustomers;
     localStorage.setItem(STORAGE_KEY_PREFIX + 'CUSTOMERS', JSON.stringify(nextCustomers));
     pushDataToCloud({ customers: nextCustomers });
   };
 
+  const addSupplier = (supplier: Supplier) => {
+    const cleanOpening = Number(supplier.openingPayable ?? supplier.openingBalance ?? supplier.previousDue ?? 0) || 0;
+    const finalSupplier: Supplier = {
+      ...supplier,
+      openingPayable: cleanOpening,
+      openingBalance: cleanOpening,
+      previousDue: cleanOpening,
+      currentPayable: supplier.currentPayable !== undefined && supplier.currentPayable > 0
+        ? supplier.currentPayable
+        : cleanOpening
+    };
+    const nextSuppliers = [finalSupplier, ...suppliersRef.current];
+    suppliersRef.current = nextSuppliers;
+    setSuppliers(nextSuppliers);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIERS', JSON.stringify(nextSuppliers));
+    pushDataToCloud({ suppliers: nextSuppliers });
+
+    addAuditLog('সাপ্লায়ার', 'নতুন সাপ্লায়ার', `নতুন সাপ্লায়ার যুক্ত: ${finalSupplier.companyName || finalSupplier.name} (পূর্বের বকেয়া: ${cleanOpening} ৳)`);
+  };
+
+  const updateSupplier = (id: string, updated: Partial<Supplier>) => {
+    const nextSuppliers = suppliersRef.current.map(s => {
+      if (s.id === id) {
+        const merged = { ...s, ...updated };
+        const cleanOpening = Number(merged.openingPayable ?? merged.openingBalance ?? merged.previousDue ?? 0) || 0;
+        return {
+          ...merged,
+          openingPayable: cleanOpening,
+          openingBalance: cleanOpening,
+          previousDue: cleanOpening
+        };
+      }
+      return s;
+    });
+    suppliersRef.current = nextSuppliers;
+    setSuppliers(nextSuppliers);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIERS', JSON.stringify(nextSuppliers));
+    pushDataToCloud({ suppliers: nextSuppliers });
+
+    const sup = nextSuppliers.find(s => s.id === id);
+    if (sup) {
+      addAuditLog('সাপ্লায়ার', 'সাপ্লায়ার আপডেট', `সাপ্লায়ার তথ্য সংশোধন: ${sup.companyName || sup.name}`);
+    }
+  };
+
   const addInvoice = (invData: Omit<Invoice, 'id' | 'createdAt' | 'createdBy'>): Invoice => {
+    const customer = invData.customerId ? customersRef.current.find(c => c.id === invData.customerId) : null;
+    const prevDue = invData.previousDue !== undefined ? invData.previousDue : (customer ? (customer.currentDue || 0) : 0);
+    const totDue = invData.totalDue !== undefined ? invData.totalDue : (prevDue + (invData.dueAmount || 0));
+
     const newInvoice: Invoice = {
       ...invData,
+      previousDue: prevDue,
+      totalDue: totDue,
       id: 'inv_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       createdAt: new Date().toISOString(),
       createdBy: currentUser.name,
@@ -1542,6 +2078,278 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     return newInvoice;
+  };
+
+  const deleteInvoice = (idOrInvoice: string | Invoice) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো ইনভয়েস ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const targetInvoice = typeof idOrInvoice === 'string'
+      ? invoicesRef.current.find(i => i.id === idOrInvoice)
+      : idOrInvoice;
+    if (!targetInvoice) return;
+
+    // 1. Auto return sold items back to stock!
+    let nextProducts = [...productsRef.current];
+    if (Array.isArray(targetInvoice.items) && targetInvoice.items.length > 0) {
+      targetInvoice.items.forEach(item => {
+        const qty = Number(item.quantity) || 0;
+        if (qty <= 0) return;
+        const isExchangeReturn = item.category === 'এক্সচেঞ্জ ফেরত' || item.name?.startsWith('[ফেরত মাল]');
+        const prodIndex = nextProducts.findIndex(p => {
+          if (item.productId && p.id === item.productId) return true;
+          const cleanItemName = (item.name || '').replace(/^\[(নতুন মাল|ফেরত মাল)\]\s*/, '').trim().toLowerCase();
+          return p.name.trim().toLowerCase() === cleanItemName || (item.code && p.code === item.code) || p.id === item.id;
+        });
+        if (prodIndex !== -1) {
+          const curStock = Number(nextProducts[prodIndex].stock) || 0;
+          const updatedStock = isExchangeReturn ? curStock - qty : curStock + qty;
+          nextProducts[prodIndex] = {
+            ...nextProducts[prodIndex],
+            stock: Math.round(updatedStock * 100) / 100,
+            updatedAt: new Date().toISOString()
+          };
+        }
+      });
+      productsRef.current = nextProducts;
+      setProducts(nextProducts);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(nextProducts));
+    }
+
+    // 2. Revert Customer Balances
+    let nextCustomers = customersRef.current;
+    if (targetInvoice.customerId) {
+      const revertPurchased = targetInvoice.grandTotal || 0;
+      const revertPaid = (targetInvoice.cashPaid || 0) + (targetInvoice.onlinePaid || 0);
+      const revertDue = targetInvoice.dueAmount !== undefined
+        ? targetInvoice.dueAmount
+        : (revertPurchased - revertPaid);
+
+      nextCustomers = customersRef.current.map(c => {
+        if (c.id === targetInvoice.customerId) {
+          return {
+            ...c,
+            totalPurchased: Math.max(0, (c.totalPurchased || 0) - revertPurchased),
+            totalPaid: Math.max(0, (c.totalPaid || 0) - revertPaid),
+            currentDue: (c.currentDue || 0) - revertDue,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return c;
+      });
+      customersRef.current = nextCustomers;
+      setCustomers(nextCustomers);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'CUSTOMERS', JSON.stringify(nextCustomers));
+    }
+
+    // 3. Move to recycle bin
+    moveToRecycleBin('invoice', `ইনভয়েস #${targetInvoice.invoiceNo} (${targetInvoice.customerName || 'কাস্টমার'})`, targetInvoice, targetInvoice.grandTotal);
+
+    // 4. Remove from invoices list
+    const nextInvoices = invoicesRef.current.filter(i => i.id !== targetInvoice.id);
+    invoicesRef.current = nextInvoices;
+    setInvoices(nextInvoices);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'INVOICES', JSON.stringify(nextInvoices));
+
+    // 5. Audit Log
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'ইনভয়েস',
+      action: 'ডিলিট',
+      description: `ইনভয়েস #${targetInvoice.invoiceNo} মুছে ফেলা হয়েছে এবং এর মালামাল স্বয়ংক্রিয়ভাবে স্টকে ফেরত যোগ করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    // 6. Push updated state to cloud
+    pushDataToCloud({
+      invoices: nextInvoices,
+      customers: nextCustomers,
+      products: nextProducts,
+      auditLogs: nextLogs
+    });
+  };
+
+  // Update Invoice with automatic stock (+/-) & customer balance adjustment
+  const updateInvoice = (
+    invoiceId: string,
+    updatedData: Partial<Invoice>,
+    customItems?: InvoiceItem[]
+  ): Invoice | undefined => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো ইনভয়েস এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return undefined;
+    }
+    const oldInvoice = invoicesRef.current.find(i => i.id === invoiceId);
+    if (!oldInvoice) return undefined;
+
+    const oldItems: InvoiceItem[] = Array.isArray(oldInvoice.items) ? oldInvoice.items : [];
+    const newItems: InvoiceItem[] = customItems || (updatedData.items ? updatedData.items : oldItems);
+
+    // 1. Stock Adjustment (+/-)
+    // Selling item deducts stock.
+    // delta = oldQty - newQty.
+    // If sold LESS now -> add delta back to stock.
+    // If sold MORE now -> deduct delta from stock.
+    let nextProducts = [...productsRef.current];
+
+    const oldQtyMap = new Map<string, number>();
+    oldItems.forEach(it => {
+      const qty = Number(it.quantity) || 0;
+      if (qty <= 0) return;
+      const key = it.productId || (it.name || '').trim().toLowerCase();
+      oldQtyMap.set(key, (oldQtyMap.get(key) || 0) + qty);
+    });
+
+    const newQtyMap = new Map<string, number>();
+    newItems.forEach(it => {
+      const qty = Number(it.quantity) || 0;
+      if (qty <= 0) return;
+      const key = it.productId || (it.name || '').trim().toLowerCase();
+      newQtyMap.set(key, (newQtyMap.get(key) || 0) + qty);
+    });
+
+    const allProductKeys = new Set([...oldQtyMap.keys(), ...newQtyMap.keys()]);
+    allProductKeys.forEach(key => {
+      const oldQty = oldQtyMap.get(key) || 0;
+      const newQty = newQtyMap.get(key) || 0;
+      const delta = oldQty - newQty;
+
+      if (delta !== 0) {
+        const prodIndex = nextProducts.findIndex(p => {
+          if (p.id === key) return true;
+          return p.name.trim().toLowerCase() === key;
+        });
+        if (prodIndex !== -1) {
+          const curStock = Number(nextProducts[prodIndex].stock) || 0;
+          nextProducts[prodIndex] = {
+            ...nextProducts[prodIndex],
+            stock: Math.round((curStock + delta) * 100) / 100,
+            updatedAt: new Date().toISOString()
+          };
+        }
+      }
+    });
+
+    productsRef.current = nextProducts;
+    setProducts(nextProducts);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(nextProducts));
+
+    // 2. Customer Ledger Adjustment
+    let nextCustomers = [...customersRef.current];
+    const oldGrandTotal = Number(oldInvoice.grandTotal) || 0;
+    const oldPaid = (Number(oldInvoice.cashPaid) || 0) + (Number(oldInvoice.onlinePaid) || 0);
+    const oldDue = oldInvoice.dueAmount !== undefined ? Number(oldInvoice.dueAmount) : (oldGrandTotal - oldPaid);
+
+    const newGrandTotal = updatedData.grandTotal !== undefined ? Number(updatedData.grandTotal) : oldGrandTotal;
+    const newPaid = (updatedData.cashPaid !== undefined ? Number(updatedData.cashPaid) : (Number(oldInvoice.cashPaid) || 0)) + 
+                    (updatedData.onlinePaid !== undefined ? Number(updatedData.onlinePaid) : (Number(oldInvoice.onlinePaid) || 0));
+    const newDue = updatedData.dueAmount !== undefined ? Number(updatedData.dueAmount) : (newGrandTotal - newPaid);
+
+    const targetCustomerId = updatedData.customerId !== undefined ? updatedData.customerId : oldInvoice.customerId;
+
+    if (oldInvoice.customerId === targetCustomerId && targetCustomerId) {
+      const diffPurchased = newGrandTotal - oldGrandTotal;
+      const diffPaid = newPaid - oldPaid;
+      const diffDue = newDue - oldDue;
+
+      nextCustomers = nextCustomers.map(c => {
+        if (c.id === targetCustomerId) {
+          return {
+            ...c,
+            name: updatedData.customerName?.trim() || c.name,
+            phone: updatedData.customerPhone?.trim() || c.phone,
+            address: updatedData.customerAddress?.trim() || c.address,
+            totalPurchased: Math.max(0, (c.totalPurchased || 0) + diffPurchased),
+            totalPaid: Math.max(0, (c.totalPaid || 0) + diffPaid),
+            currentDue: (c.currentDue || 0) + diffDue,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return c;
+      });
+    } else {
+      if (oldInvoice.customerId) {
+        nextCustomers = nextCustomers.map(c => {
+          if (c.id === oldInvoice.customerId) {
+            return {
+              ...c,
+              totalPurchased: Math.max(0, (c.totalPurchased || 0) - oldGrandTotal),
+              totalPaid: Math.max(0, (c.totalPaid || 0) - oldPaid),
+              currentDue: (c.currentDue || 0) - oldDue,
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return c;
+        });
+      }
+      if (targetCustomerId) {
+        nextCustomers = nextCustomers.map(c => {
+          if (c.id === targetCustomerId) {
+            return {
+              ...c,
+              name: updatedData.customerName?.trim() || c.name,
+              phone: updatedData.customerPhone?.trim() || c.phone,
+              address: updatedData.customerAddress?.trim() || c.address,
+              totalPurchased: (c.totalPurchased || 0) + newGrandTotal,
+              totalPaid: (c.totalPaid || 0) + newPaid,
+              currentDue: (c.currentDue || 0) + newDue,
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return c;
+        });
+      }
+    }
+
+    customersRef.current = nextCustomers;
+    setCustomers(nextCustomers);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'CUSTOMERS', JSON.stringify(nextCustomers));
+
+    // 3. Update Invoice
+    const updatedInvoice: Invoice = {
+      ...oldInvoice,
+      ...updatedData,
+      items: newItems,
+      grandTotal: newGrandTotal,
+      cashPaid: updatedData.cashPaid !== undefined ? Number(updatedData.cashPaid) : (Number(oldInvoice.cashPaid) || 0),
+      onlinePaid: updatedData.onlinePaid !== undefined ? Number(updatedData.onlinePaid) : (Number(oldInvoice.onlinePaid) || 0),
+      dueAmount: newDue,
+      status: newDue <= 0 ? 'paid' : (newPaid > 0 ? 'partial' : 'due'),
+      updatedAt: new Date().toISOString()
+    };
+
+    const nextInvoices = invoicesRef.current.map(inv => inv.id === invoiceId ? updatedInvoice : inv);
+    invoicesRef.current = nextInvoices;
+    setInvoices(nextInvoices);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'INVOICES', JSON.stringify(nextInvoices));
+
+    // 4. Audit Log
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'ইনভয়েস',
+      action: 'সংশোধন',
+      description: `ইনভয়েস #${updatedInvoice.invoiceNo} (${updatedInvoice.customerName || 'কাস্টমার'}) সংশোধন ও আপডেট করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    // 5. Cloud push
+    pushDataToCloud({
+      invoices: nextInvoices,
+      customers: nextCustomers,
+      products: nextProducts,
+      auditLogs: nextLogs
+    });
+
+    return updatedInvoice;
   };
 
   // Add Due Payment & Update Customer with Instant Cloud Broadcast
@@ -1617,7 +2425,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return s;
     });
     setSuppliers(nextSuppliers);
-    localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIER_PAYMENTS', JSON.stringify(nextSuppliers));
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIERS', JSON.stringify(nextSuppliers));
 
     const newLog: AuditLog = {
       id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -1635,6 +2443,282 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     pushDataToCloud({
       supplierBills: nextSupplierBills,
       suppliers: nextSuppliers,
+      auditLogs: nextLogs
+    });
+  };
+
+  // Delete Supplier Bill with automatic stock deduction (-)
+  const deleteSupplierBill = (idOrBill: string | SupplierBill) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো বিল ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const targetBill = typeof idOrBill === 'string'
+      ? supplierBillsRef.current.find(b => b.id === idOrBill)
+      : idOrBill;
+    if (!targetBill) return;
+
+    // 1. Auto deduct purchased items from stock! (-)
+    let nextProducts = [...productsRef.current];
+    const billItems = extractSupplierBillItems(targetBill);
+    let totalDeductedKg = 0;
+
+    billItems.forEach(item => {
+      const qty = Number(item.quantity) || 0;
+      if (qty <= 0) return;
+      totalDeductedKg += qty;
+
+      const prodIndex = nextProducts.findIndex(p => {
+        if (item.productId && p.id === item.productId) return true;
+        const cleanItemName = (item.name || '').trim().toLowerCase();
+        return p.name.trim().toLowerCase() === cleanItemName || (item.id && p.id === item.id);
+      });
+
+      if (prodIndex !== -1) {
+        const curStock = Number(nextProducts[prodIndex].stock) || 0;
+        nextProducts[prodIndex] = {
+          ...nextProducts[prodIndex],
+          stock: Math.max(0, Math.round((curStock - qty) * 100) / 100),
+          updatedAt: new Date().toISOString()
+        };
+      }
+    });
+
+    productsRef.current = nextProducts;
+    setProducts(nextProducts);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(nextProducts));
+
+    // 2. Revert Supplier Accounts
+    let nextSuppliers = suppliersRef.current;
+    if (targetBill.supplierId) {
+      const revertPurchased = Number(targetBill.totalAmount) || 0;
+      const revertPaid = (Number(targetBill.cashPaid) || 0) + (Number(targetBill.onlinePaid) || 0);
+      const revertDue = targetBill.dueAmount !== undefined
+        ? Number(targetBill.dueAmount) || 0
+        : (revertPurchased - revertPaid);
+
+      nextSuppliers = suppliersRef.current.map(s => {
+        if (s.id === targetBill.supplierId) {
+          return {
+            ...s,
+            totalPurchased: Math.max(0, (s.totalPurchased || 0) - revertPurchased),
+            totalPaid: Math.max(0, (s.totalPaid || 0) - revertPaid),
+            currentPayable: Math.max(0, (s.currentPayable || 0) - revertDue),
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return s;
+      });
+      suppliersRef.current = nextSuppliers;
+      setSuppliers(nextSuppliers);
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIERS', JSON.stringify(nextSuppliers));
+    }
+
+    // 3. Move to recycle bin
+    moveToRecycleBin('supplier_bill', `মাল ক্রয় বিল #${targetBill.billNo} (${targetBill.companyName || targetBill.supplierName})`, targetBill, targetBill.totalAmount);
+
+    // 4. Remove from supplierBills list
+    const nextSupplierBills = supplierBillsRef.current.filter(b => b.id !== targetBill.id);
+    supplierBillsRef.current = nextSupplierBills;
+    setSupplierBills(nextSupplierBills);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIER_BILLS', JSON.stringify(nextSupplierBills));
+
+    // 5. Audit Log
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'সাপ্লায়ার',
+      action: 'ডিলিট',
+      description: `মাল ক্রয় বিল #${targetBill.billNo} (${targetBill.companyName || targetBill.supplierName}) মুছে ফেলা হয়েছে এবং এর মালামাল (${totalDeductedKg > 0 ? toBengaliNumber(totalDeductedKg) + ' কেজি' : ''}) স্টক থেকে স্বয়ংক্রিয়ভাবে মাইনাস (-) করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    // 6. Push to Cloud
+    pushDataToCloud({
+      supplierBills: nextSupplierBills,
+      suppliers: nextSuppliers,
+      products: nextProducts,
+      auditLogs: nextLogs
+    });
+  };
+
+  // Update Supplier Bill with automatic stock +/- adjustment
+  const updateSupplierBill = (
+    billId: string, 
+    updatedBillData: Partial<SupplierBill>, 
+    customItems?: SupplierBillItem[]
+  ) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো বিল এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const oldBill = supplierBillsRef.current.find(b => b.id === billId);
+    if (!oldBill) return;
+
+    // 1. Calculate stock difference (+/-) between old items and new items
+    const oldItems = extractSupplierBillItems(oldBill);
+    const newItems = customItems || (updatedBillData.items ? updatedBillData.items : extractSupplierBillItems({ ...oldBill, ...updatedBillData }));
+
+    const oldStockMap = new Map<string, { name: string; productId?: string; qty: number; rate: number }>();
+    oldItems.forEach(it => {
+      const nameKey = (it.name || '').trim().toLowerCase();
+      if (!nameKey && (it.quantity || 0) <= 0) return;
+      const key = it.productId || nameKey;
+      const existing = oldStockMap.get(key);
+      if (existing) {
+        existing.qty += (Number(it.quantity) || 0);
+      } else {
+        oldStockMap.set(key, { name: it.name.trim(), productId: it.productId, qty: Number(it.quantity) || 0, rate: Number(it.unitPrice) || 0 });
+      }
+    });
+
+    const newStockMap = new Map<string, { name: string; productId?: string; qty: number; rate: number }>();
+    newItems.forEach(it => {
+      const nameKey = (it.name || '').trim().toLowerCase();
+      if (!nameKey && (it.quantity || 0) <= 0) return;
+      const key = it.productId || nameKey;
+      const existing = newStockMap.get(key);
+      if (existing) {
+        existing.qty += (Number(it.quantity) || 0);
+      } else {
+        newStockMap.set(key, { name: it.name.trim(), productId: it.productId, qty: Number(it.quantity) || 0, rate: Number(it.unitPrice) || 0 });
+      }
+    });
+
+    let nextProducts = [...productsRef.current];
+    const allKeys = new Set([...oldStockMap.keys(), ...newStockMap.keys()]);
+
+    allKeys.forEach(key => {
+      const oldEntry = oldStockMap.get(key);
+      const newEntry = newStockMap.get(key);
+      const oldQty = oldEntry?.qty || 0;
+      const newQty = newEntry?.qty || 0;
+      const diff = newQty - oldQty;
+
+      if (diff !== 0) {
+        const targetName = (newEntry?.name || oldEntry?.name || '').trim();
+        const targetId = newEntry?.productId || oldEntry?.productId;
+
+        const prodIdx = nextProducts.findIndex(p => 
+          (targetId && p.id === targetId) || 
+          p.name.trim().toLowerCase() === targetName.toLowerCase()
+        );
+
+        if (prodIdx !== -1) {
+          const curStock = Number(nextProducts[prodIdx].stock) || 0;
+          const updatedStock = Math.max(0, Math.round((curStock + diff) * 100) / 100);
+          nextProducts[prodIdx] = {
+            ...nextProducts[prodIdx],
+            stock: updatedStock,
+            purchasePrice: (newEntry?.rate && newEntry.rate > 0) ? newEntry.rate : nextProducts[prodIdx].purchasePrice,
+            updatedAt: new Date().toISOString()
+          };
+        } else if (newQty > 0 && targetName) {
+          // New product added during edit
+          const createdProd: ProductCatalogItem = {
+            id: 'p_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+            code: `P-${String(nextProducts.length + 1).padStart(3, '0')}`,
+            name: targetName,
+            category: 'সাধারণ মালামাল',
+            purchasePrice: newEntry?.rate || 0,
+            salePrice: newEntry?.rate ? Math.round(newEntry.rate * 1.15) : 0,
+            stock: newQty,
+            unit: 'KG',
+            createdAt: new Date().toISOString()
+          };
+          nextProducts = [createdProd, ...nextProducts];
+        }
+      }
+    });
+
+    productsRef.current = nextProducts;
+    setProducts(nextProducts);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'PRODUCTS', JSON.stringify(nextProducts));
+
+    // 2. Adjust supplier accounts
+    const newTotal = updatedBillData.totalAmount !== undefined ? Number(updatedBillData.totalAmount) : oldBill.totalAmount;
+    const newCash = updatedBillData.cashPaid !== undefined ? Number(updatedBillData.cashPaid) : oldBill.cashPaid;
+    const newOnline = updatedBillData.onlinePaid !== undefined ? Number(updatedBillData.onlinePaid) : oldBill.onlinePaid;
+    const newDue = updatedBillData.dueAmount !== undefined ? Number(updatedBillData.dueAmount) : Math.max(0, newTotal - (newCash + newOnline));
+    const targetSupId = updatedBillData.supplierId || oldBill.supplierId;
+
+    let nextSuppliers = suppliersRef.current.map(s => {
+      // If same supplier
+      if (s.id === oldBill.supplierId && oldBill.supplierId === targetSupId) {
+        const diffTotal = newTotal - oldBill.totalAmount;
+        const diffPaid = (newCash + newOnline) - ((oldBill.cashPaid || 0) + (oldBill.onlinePaid || 0));
+        const diffDue = newDue - (oldBill.dueAmount || 0);
+        return {
+          ...s,
+          totalPurchased: Math.max(0, (s.totalPurchased || 0) + diffTotal),
+          totalPaid: Math.max(0, (s.totalPaid || 0) + diffPaid),
+          currentPayable: Math.max(0, (s.currentPayable || 0) + diffDue),
+          updatedAt: new Date().toISOString()
+        };
+      }
+      // If supplier changed: revert old supplier
+      if (s.id === oldBill.supplierId && oldBill.supplierId !== targetSupId) {
+        return {
+          ...s,
+          totalPurchased: Math.max(0, (s.totalPurchased || 0) - oldBill.totalAmount),
+          totalPaid: Math.max(0, (s.totalPaid || 0) - ((oldBill.cashPaid || 0) + (oldBill.onlinePaid || 0))),
+          currentPayable: Math.max(0, (s.currentPayable || 0) - (oldBill.dueAmount || 0)),
+          updatedAt: new Date().toISOString()
+        };
+      }
+      // If supplier changed: apply to new supplier
+      if (s.id === targetSupId && oldBill.supplierId !== targetSupId) {
+        return {
+          ...s,
+          totalPurchased: (s.totalPurchased || 0) + newTotal,
+          totalPaid: (s.totalPaid || 0) + (newCash + newOnline),
+          currentPayable: (s.currentPayable || 0) + newDue,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return s;
+    });
+    suppliersRef.current = nextSuppliers;
+    setSuppliers(nextSuppliers);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIERS', JSON.stringify(nextSuppliers));
+
+    // 3. Update supplier bills
+    const updatedFullBill: SupplierBill = {
+      ...oldBill,
+      ...updatedBillData,
+      items: newItems,
+      totalAmount: newTotal,
+      cashPaid: newCash,
+      onlinePaid: newOnline,
+      dueAmount: newDue
+    };
+
+    const nextSupplierBills = supplierBillsRef.current.map(b => b.id === billId ? updatedFullBill : b);
+    supplierBillsRef.current = nextSupplierBills;
+    setSupplierBills(nextSupplierBills);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'SUPPLIER_BILLS', JSON.stringify(nextSupplierBills));
+
+    // 4. Audit Log
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'সাপ্লায়ার',
+      action: 'এডিট',
+      description: `মাল ক্রয় বিল #${updatedFullBill.billNo} (${updatedFullBill.companyName || updatedFullBill.supplierName}) এডিট করা হয়েছে এবং পণ্যের স্টক (+/-) সমন্বয় করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    // 5. Cloud broadcast
+    pushDataToCloud({
+      supplierBills: nextSupplierBills,
+      suppliers: nextSuppliers,
+      products: nextProducts,
       auditLogs: nextLogs
     });
   };
@@ -1797,9 +2881,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const normalizedTargetDate = normalizeDate(tallyData.date);
     const existingIndex = cashTalliesRef.current.findIndex(t => normalizeDate(t.date) === normalizedTargetDate);
     
+    // Capture current stock snapshot at the time cash tally is saved (দিনের শেষ স্টক)
+    const currentTotalStockKg = productsRef.current.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+    const currentStockSnapshot = productsRef.current.reduce((acc, p) => {
+      acc[p.id] = Number(p.stock) || 0;
+      return acc;
+    }, {} as Record<string, number>);
+
     const newRecord: CashTallyRecord = {
       ...tallyData,
       date: normalizedTargetDate,
+      lastStockKg: tallyData.lastStockKg !== undefined ? tallyData.lastStockKg : currentTotalStockKg,
+      stockSnapshot: tallyData.stockSnapshot || currentStockSnapshot,
       id: existingIndex >= 0 ? cashTalliesRef.current[existingIndex].id : 'tally_' + Date.now(),
       savedBy: currentUser.name,
       savedAt: new Date().toISOString()
@@ -1860,6 +2953,487 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  // Investment Actions
+  const addInvestment = (investmentData: Omit<Investment, 'id' | 'createdAt'>) => {
+    const newInv: Investment = {
+      ...investmentData,
+      id: 'inv_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      createdAt: new Date().toISOString()
+    };
+    const nextList = [newInv, ...investmentsRef.current];
+    setInvestments(nextList);
+    investmentsRef.current = nextList;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'INVESTMENTS', JSON.stringify(nextList));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'হিসাব',
+      action: 'বিনিয়োগ যোগ',
+      description: `বিনিয়োগকারী ${investmentData.investorName}-এর পক্ষ থেকে ${investmentData.amount} ৳ ব্যবসার মূলধন যুক্ত হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      investments: nextList,
+      auditLogs: nextLogs
+    });
+  };
+
+  const updateInvestment = (id: string, updated: Partial<Investment>) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো তথ্য এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const nextList = investmentsRef.current.map(inv => inv.id === id ? { ...inv, ...updated } : inv);
+    setInvestments(nextList);
+    investmentsRef.current = nextList;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'INVESTMENTS', JSON.stringify(nextList));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'হিসাব',
+      action: 'বিনিয়োগ আপডেট',
+      description: `বিনিয়োগের তথ্য সংশোধন করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      investments: nextList,
+      auditLogs: nextLogs
+    });
+  };
+
+  const deleteInvestment = (id: string) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো তথ্য ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const target = investmentsRef.current.find(inv => inv.id === id);
+    if (!target) return;
+    moveToRecycleBin('investment', `বিনিয়োগ - ${target.investorName}`, target, target.amount);
+    const nextList = investmentsRef.current.filter(inv => inv.id !== id);
+    setInvestments(nextList);
+    investmentsRef.current = nextList;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'INVESTMENTS', JSON.stringify(nextList));
+
+    pushDataToCloud({
+      investments: nextList
+    });
+  };
+
+  // Bank Loan Actions
+  const addLoan = (loanData: Omit<BankLoan, 'id' | 'createdAt'>) => {
+    const newLoan: BankLoan = {
+      ...loanData,
+      id: 'loan_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      createdAt: new Date().toISOString()
+    };
+    const nextList = [newLoan, ...loansRef.current];
+    setLoans(nextList);
+    loansRef.current = nextList;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'LOANS', JSON.stringify(nextList));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'হিসাব',
+      action: 'ব্যাংক লোন গ্রহণ',
+      description: `${loanData.bankName} থেকে ${loanData.loanAmount} ৳ ঋণ গ্রহণ এন্ট্রি করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      loans: nextList,
+      auditLogs: nextLogs
+    });
+  };
+
+  const updateLoan = (id: string, updated: Partial<BankLoan>) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো তথ্য এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const nextList = loansRef.current.map(l => l.id === id ? { ...l, ...updated } : l);
+    setLoans(nextList);
+    loansRef.current = nextList;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'LOANS', JSON.stringify(nextList));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'হিসাব',
+      action: 'ব্যাংক লোন আপডেট',
+      description: `ব্যাংক লোনের তথ্য সংশোধন করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      loans: nextList,
+      auditLogs: nextLogs
+    });
+  };
+
+  const deleteLoan = (id: string) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো তথ্য ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const target = loansRef.current.find(l => l.id === id);
+    if (!target) return;
+    moveToRecycleBin('loan', `ব্যাংক লোন - ${target.bankName}`, target, target.loanAmount);
+    const nextList = loansRef.current.filter(l => l.id !== id);
+    setLoans(nextList);
+    loansRef.current = nextList;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'LOANS', JSON.stringify(nextList));
+
+    pushDataToCloud({
+      loans: nextList
+    });
+  };
+
+  // Loan Repayment Actions
+  const addLoanRepayment = (repData: Omit<LoanRepayment, 'id' | 'createdAt'>) => {
+    const newRep: LoanRepayment = {
+      ...repData,
+      id: 'lrep_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      createdAt: new Date().toISOString()
+    };
+    const nextList = [newRep, ...loanRepaymentsRef.current];
+    setLoanRepayments(nextList);
+    loanRepaymentsRef.current = nextList;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'LOAN_REPAYMENTS', JSON.stringify(nextList));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'হিসাব',
+      action: 'ঋণ পরিশোধ',
+      description: `${repData.bankName}-এ ${repData.amount} ৳ ঋণ পরিশোধ এন্ট্রি করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      loanRepayments: nextList,
+      auditLogs: nextLogs
+    });
+  };
+
+  const updateLoanRepayment = (id: string, updated: Partial<LoanRepayment>) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো তথ্য এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const nextList = loanRepaymentsRef.current.map(r => r.id === id ? { ...r, ...updated } : r);
+    setLoanRepayments(nextList);
+    loanRepaymentsRef.current = nextList;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'LOAN_REPAYMENTS', JSON.stringify(nextList));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'হিসাব',
+      action: 'ঋণ পরিশোধ আপডেট',
+      description: `ঋণ পরিশোধের তথ্য সংশোধন করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      loanRepayments: nextList,
+      auditLogs: nextLogs
+    });
+  };
+
+  const deleteLoanRepayment = (id: string) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো তথ্য ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const target = loanRepaymentsRef.current.find(r => r.id === id);
+    if (!target) return;
+    moveToRecycleBin('loan_repayment', `ঋণ পরিশোধ - ${target.bankName}`, target, target.amount);
+    const nextList = loanRepaymentsRef.current.filter(r => r.id !== id);
+    setLoanRepayments(nextList);
+    loanRepaymentsRef.current = nextList;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'LOAN_REPAYMENTS', JSON.stringify(nextList));
+
+    pushDataToCloud({
+      loanRepayments: nextList
+    });
+  };
+
+  // ===================== Employee Management Actions =====================
+  const addEmployee = (empData: Omit<Employee, 'id' | 'createdAt'>): Employee => {
+    const newEmp: Employee = {
+      ...empData,
+      id: 'emp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      createdAt: new Date().toISOString()
+    };
+    const nextEmployees = [newEmp, ...employeesRef.current];
+    setEmployees(nextEmployees);
+    employeesRef.current = nextEmployees;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEES', JSON.stringify(nextEmployees));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'ইউজার',
+      action: 'কর্মচারী যুক্ত',
+      description: `নতুন কর্মচারী ${empData.name} (${empData.designation || 'স্টাফ'}, বেতন: ${empData.salary} ৳) যুক্ত করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      employees: nextEmployees,
+      auditLogs: nextLogs
+    });
+
+    return newEmp;
+  };
+
+  const updateEmployee = (id: string, updated: Partial<Employee>) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কর্মচারী এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const nextEmployees = employeesRef.current.map(e => e.id === id ? { ...e, ...updated } : e);
+    setEmployees(nextEmployees);
+    employeesRef.current = nextEmployees;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEES', JSON.stringify(nextEmployees));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'ইউজার',
+      action: 'কর্মচারী আপডেট',
+      description: `কর্মচারী ${updated.name || 'তথ্য'} আপডেট করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      employees: nextEmployees,
+      auditLogs: nextLogs
+    });
+  };
+
+  const deleteEmployee = (id: string) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে কর্মচারী ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const target = employeesRef.current.find(e => e.id === id);
+    if (!target) return;
+    moveToRecycleBin('customer' as any, `কর্মচারী - ${target.name} (${target.designation})`, target, target.salary);
+    const nextEmployees = employeesRef.current.filter(e => e.id !== id);
+    setEmployees(nextEmployees);
+    employeesRef.current = nextEmployees;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEES', JSON.stringify(nextEmployees));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'ইউজার',
+      action: 'কর্মচারী ডিলিট',
+      description: `কর্মচারী ${target.name} মুছে ফেলা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      employees: nextEmployees,
+      auditLogs: nextLogs
+    });
+  };
+
+  // ===================== Employee Salary Disbursements & Auto Expense Sync =====================
+  const addEmployeePayment = (paymentData: Omit<EmployeePayment, 'id' | 'createdAt' | 'paidBy' | 'expenseId'>): EmployeePayment => {
+    const paymentId = 'epay_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+    const expenseId = 'exp_emp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+    
+    const typeLabel = paymentData.paymentType === 'advance' 
+      ? 'অগ্রিম বেতন' 
+      : (paymentData.paymentType === 'bonus' ? 'বোনাস' : 'মাসিক বেতন');
+    
+    const expenseTitle = `স্টাফ বেতন - ${paymentData.employeeName}`;
+    const expenseDesc = `কর্মচারী ${paymentData.employeeName}-কে ${typeLabel} প্রদান${paymentData.month ? ' (মাস: ' + paymentData.month + ')' : ''}${paymentData.notes ? ' | নোট: ' + paymentData.notes : ''}`;
+
+    // 1. Automatically create Expense entry in daily expenses & statement
+    const autoExpense: Expense = {
+      id: expenseId,
+      date: paymentData.date,
+      category: 'কর্মচারী বেতন',
+      title: expenseTitle,
+      description: expenseDesc,
+      amount: paymentData.amount,
+      paymentMethod: paymentData.paymentMethod,
+      cashPaid: paymentData.paymentMethod === 'cash' ? paymentData.amount : 0,
+      onlinePaid: paymentData.paymentMethod === 'online' ? paymentData.amount : 0,
+      onlineMethod: paymentData.onlineMethod,
+      employeePaymentId: paymentId,
+      notes: paymentData.notes,
+      createdAt: new Date().toISOString(),
+      createdBy: currentUser.name,
+      recordedBy: currentUser.name
+    };
+
+    const nextExpenses = [autoExpense, ...expensesRef.current];
+    setExpenses(nextExpenses);
+    expensesRef.current = nextExpenses;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EXPENSES', JSON.stringify(nextExpenses));
+
+    // 2. Create Employee Payment record linked to autoExpense
+    const newPayment: EmployeePayment = {
+      ...paymentData,
+      id: paymentId,
+      expenseId,
+      paidBy: currentUser.name,
+      createdAt: new Date().toISOString()
+    };
+
+    const nextPayments = [newPayment, ...employeePaymentsRef.current];
+    setEmployeePayments(nextPayments);
+    employeePaymentsRef.current = nextPayments;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEE_PAYMENTS', JSON.stringify(nextPayments));
+
+    // 3. Audit Log
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'খরচ',
+      action: 'কর্মচারী বেতন প্রদান',
+      description: `কর্মচারী ${paymentData.employeeName}-কে ${paymentData.amount} ৳ (${typeLabel}) প্রদান করা হয়েছে এবং দৈনিক খরচে স্বয়ংক্রিয়ভাবে যুক্ত করা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    // 4. Cloud sync both
+    pushDataToCloud({
+      employeePayments: nextPayments,
+      expenses: nextExpenses,
+      auditLogs: nextLogs
+    });
+
+    return newPayment;
+  };
+
+  const updateEmployeePayment = (id: string, updated: Partial<EmployeePayment>) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে তথ্য এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const oldPayment = employeePaymentsRef.current.find(p => p.id === id);
+    if (!oldPayment) return;
+
+    const nextPayments = employeePaymentsRef.current.map(p => p.id === id ? { ...p, ...updated } : p);
+    setEmployeePayments(nextPayments);
+    employeePaymentsRef.current = nextPayments;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEE_PAYMENTS', JSON.stringify(nextPayments));
+
+    // Update linked expense if exists
+    let nextExpenses = expensesRef.current;
+    const linkedExpenseIndex = nextExpenses.findIndex(e => e.id === oldPayment.expenseId || e.employeePaymentId === id);
+    if (linkedExpenseIndex >= 0) {
+      const typeLabel = (updated.paymentType || oldPayment.paymentType) === 'advance' 
+        ? 'অগ্রিম বেতন' 
+        : ((updated.paymentType || oldPayment.paymentType) === 'bonus' ? 'বোনাস' : 'মাসিক বেতন');
+      const empName = updated.employeeName || oldPayment.employeeName;
+      const amt = updated.amount !== undefined ? updated.amount : oldPayment.amount;
+      const dt = updated.date || oldPayment.date;
+      const pMethod = updated.paymentMethod || oldPayment.paymentMethod;
+      const mth = updated.month || oldPayment.month;
+      const nts = updated.notes !== undefined ? updated.notes : oldPayment.notes;
+
+      nextExpenses = [...nextExpenses];
+      nextExpenses[linkedExpenseIndex] = {
+        ...nextExpenses[linkedExpenseIndex],
+        amount: amt,
+        date: dt,
+        paymentMethod: pMethod,
+        cashPaid: pMethod === 'cash' ? amt : 0,
+        onlinePaid: pMethod === 'online' ? amt : 0,
+        description: `কর্মচারী ${empName}-কে ${typeLabel} প্রদান${mth ? ' (মাস: ' + mth + ')' : ''}${nts ? ' | নোট: ' + nts : ''}`,
+        notes: nts
+      };
+      setExpenses(nextExpenses);
+      expensesRef.current = nextExpenses;
+      localStorage.setItem(STORAGE_KEY_PREFIX + 'EXPENSES', JSON.stringify(nextExpenses));
+    }
+
+    pushDataToCloud({
+      employeePayments: nextPayments,
+      expenses: nextExpenses
+    });
+  };
+
+  const deleteEmployeePayment = (id: string) => {
+    if (currentUser?.role === 'manager') {
+      alert('ম্যানেজার একাউন্ট থেকে তথ্য ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    const target = employeePaymentsRef.current.find(p => p.id === id);
+    if (!target) return;
+
+    moveToRecycleBin('expense' as any, `কর্মচারী বেতন প্রদান - ${target.employeeName} (${target.amount} ৳)`, target, target.amount);
+
+    const nextPayments = employeePaymentsRef.current.filter(p => p.id !== id);
+    setEmployeePayments(nextPayments);
+    employeePaymentsRef.current = nextPayments;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EMPLOYEE_PAYMENTS', JSON.stringify(nextPayments));
+
+    // Also remove the auto-created expense from daily expenses
+    const nextExpenses = expensesRef.current.filter(e => e.id !== target.expenseId && e.employeePaymentId !== id);
+    setExpenses(nextExpenses);
+    expensesRef.current = nextExpenses;
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'EXPENSES', JSON.stringify(nextExpenses));
+
+    const newLog: AuditLog = {
+      id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      category: 'খরচ',
+      action: 'কর্মচারী বেতন মুছে ফেলা',
+      description: `কর্মচারী ${target.employeeName}-এর ${target.amount} ৳ পেমেন্ট এবং সংশ্লিষ্ট খরচ মুছে ফেলা হয়েছে।`,
+      performedBy: currentUser.name,
+      timestamp: new Date().toISOString()
+    };
+    const nextLogs = [newLog, ...auditLogsRef.current];
+    setAuditLogs(nextLogs);
+    auditLogsRef.current = nextLogs;
+
+    pushDataToCloud({
+      employeePayments: nextPayments,
+      expenses: nextExpenses,
+      auditLogs: nextLogs
+    });
+  };
+
   // Factory Reset
   const resetAllData = () => {
     setCustomers([]);
@@ -1872,6 +3446,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setExpenses([]);
     setOpeningCashList([]);
     setOtherCashInList([]);
+    setInvestments([]);
+    setLoans([]);
+    setLoanRepayments([]);
+    setEmployees([]);
+    setEmployeePayments([]);
     setRecycleBin([]);
 
     // Clear local storage
@@ -1898,6 +3477,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           expenses: [],
           openingCashList: [],
           otherCashInList: [],
+          investments: [],
+          loans: [],
+          loanRepayments: [],
+          employees: [],
+          employeePayments: [],
           users,
           auditLogs: [],
           recycleBin: [],
@@ -1909,35 +3493,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('সিস্টেম', 'ডাটা রিসেট', 'সকল দোকানের ব্যবসায়িক ডাটা ক্লিয়ার করা হয়েছে।');
   };
 
-  const generateBackupJsonString = () => {
-    const backupData = {
+  const generateBackupJsonString = (selectedKeys?: string[]) => {
+    const isAll = !selectedKeys || selectedKeys.length === 0 || selectedKeys.length >= 18;
+    const shouldInclude = (key: string) => isAll || selectedKeys.includes(key);
+
+    const backupData: any = {
       version: '2.0',
       exportedAt: new Date().toISOString(),
-      shopName: 'এম এল ইলেকট্রিক (ML Electric)',
+      shopName: 'বিসমিল্লাহ ট্রেডার্স (Bismillah Traders)',
       databaseId: 'Firestore-Synced',
-      users,
-      customers,
-      suppliers,
-      products,
-      invoices,
-      duePayments,
-      supplierBills,
-      supplierPayments,
-      expenses,
-      openingCashList,
-      otherCashInList,
-      cashTallies,
-      auditLogs,
-      recycleBin
+      isSelectiveBackup: !isAll,
+      selectedCategories: isAll ? 'all' : selectedKeys
     };
+
+    if (shouldInclude('users')) backupData.users = users;
+    if (shouldInclude('customers')) backupData.customers = customers;
+    if (shouldInclude('suppliers')) backupData.suppliers = suppliers;
+    if (shouldInclude('products')) backupData.products = products;
+    if (shouldInclude('invoices')) backupData.invoices = invoices;
+    if (shouldInclude('duePayments')) backupData.duePayments = duePayments;
+    if (shouldInclude('supplierBills')) backupData.supplierBills = supplierBills;
+    if (shouldInclude('supplierPayments')) backupData.supplierPayments = supplierPayments;
+    if (shouldInclude('expenses')) backupData.expenses = expenses;
+    if (shouldInclude('openingCashList')) backupData.openingCashList = openingCashList;
+    if (shouldInclude('otherCashInList')) backupData.otherCashInList = otherCashInList;
+    if (shouldInclude('cashTallies')) backupData.cashTallies = cashTallies;
+    if (shouldInclude('investments')) backupData.investments = investments;
+    if (shouldInclude('loans')) backupData.loans = loans;
+    if (shouldInclude('loanRepayments')) backupData.loanRepayments = loanRepayments;
+    if (shouldInclude('employees')) backupData.employees = employees;
+    if (shouldInclude('employeePayments')) backupData.employeePayments = employeePayments;
+    if (shouldInclude('auditLogs')) backupData.auditLogs = auditLogs;
+    if (shouldInclude('recycleBin')) backupData.recycleBin = recycleBin;
+
     return JSON.stringify(backupData, null, 2);
   };
 
-  // Export Full System JSON Backup
-  const exportBackupJson = async () => {
-    let jsonStr = generateBackupJsonString();
+  // Export System JSON Backup (supports all or selected categories)
+  const exportBackupJson = async (selectedKeys?: string[]) => {
+    const isAll = !selectedKeys || selectedKeys.length === 0 || selectedKeys.length >= 16;
+    let jsonStr = generateBackupJsonString(selectedKeys);
 
-    if (ACTIVE_BRANCH_ID === 'ml_electric_main' && currentUser?.role === 'admin') {
+    if (isAll && ACTIVE_BRANCH_ID === 'ml_electric_main' && currentUser?.role === 'admin') {
       try {
         const response = await fetch('/api/allShopData');
         if (response.ok) {
@@ -1947,7 +3544,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 isMasterBackup: true,
                 exportedAt: new Date().toISOString(),
                 version: '2.0',
-                shopName: 'এম এল ইলেকট্রিক (ML Electric) - All Branches Master Backup',
+                shopName: 'বিসমিল্লাহ ট্রেডার্স (Bismillah Traders) - All Branches Master Backup',
                 mainShopData: JSON.parse(jsonStr),
                 allShops: resData.data
              };
@@ -1963,13 +3560,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `ML_Electric_Cloud_Backup_${selectedDate}_${Date.now()}.json`;
+    const prefix = isAll ? 'Full_Backup' : 'Selected_Backup';
+    link.download = `Bismillah_Traders_${prefix}_${selectedDate}_${Date.now()}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    addAuditLog('সিস্টেম', 'ব্যাকআপ এক্সপোর্ট', 'পূর্ণাঙ্গ ডাটাবেজ ব্যাকআপ ফাইল ডাউনলোড করা হয়েছে।');
+    addAuditLog(
+      'সিস্টেম', 
+      'ব্যাকআপ এক্সপোর্ট', 
+      isAll 
+        ? 'পূর্ণাঙ্গ ডাটাবেজ ব্যাকআপ ফাইল ডাউনলোড করা হয়েছে।' 
+        : `নির্বাচিত ক্যাটাগরির (${selectedKeys?.length}টি) কাস্টম ব্যাকআপ ফাইল ডাউনলোড করা হয়েছে।`
+    );
   };
 
   // Universal Smart Import Backup JSON
@@ -2174,102 +3778,193 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const contextValue = useMemo(() => ({
+    language,
+    setLanguage,
+    t,
+    currentTab,
+    setCurrentTab,
+    selectedDate,
+    setSelectedDate,
+    isAuthenticated,
+    login,
+    returnToMainApp,
+    activeBranchId: ACTIVE_BRANCH_ID,
+    logout,
+    currentUser,
+    setCurrentUser,
+    canEditOrDelete,
+    isManager,
+    users,
+    setUsers,
+    smtpSettings,
+    setSmtpSettings,
+    customers,
+    setCustomers,
+    suppliers,
+    setSuppliers,
+    invoices,
+    setInvoices,
+    duePayments,
+    setDuePayments,
+    supplierBills,
+    setSupplierBills,
+    supplierPayments,
+    setSupplierPayments,
+    expenses,
+    setExpenses,
+    openingCashList,
+    setOpeningCashList,
+    otherCashInList,
+    setOtherCashInList,
+    cashTallies,
+    setCashTallies,
+    auditLogs,
+    addAuditLog,
+    recycleBin,
+    moveToRecycleBin,
+    restoreFromRecycleBin,
+    permanentDeleteFromRecycleBin,
+    emptyRecycleBin,
+    products,
+    setProducts,
+    addProduct,
+    updateProduct,
+    deleteProduct,
+    addCustomer,
+    addSupplier,
+    updateSupplier,
+    addInvoice,
+    updateInvoice,
+    deleteInvoice,
+    addDuePayment,
+    addSupplierBill,
+    deleteSupplierBill,
+    updateSupplierBill,
+    addSupplierPayment,
+    addExpense,
+    setOpeningCash,
+    addOtherCashIn,
+    saveCashTally,
+    // Investments & Loans
+    investments,
+    setInvestments,
+    addInvestment,
+    updateInvestment,
+    deleteInvestment,
+    loans,
+    setLoans,
+    addLoan,
+    updateLoan,
+    deleteLoan,
+    loanRepayments,
+    setLoanRepayments,
+    addLoanRepayment,
+    updateLoanRepayment,
+    deleteLoanRepayment,
+    employees,
+    setEmployees,
+    addEmployee,
+    updateEmployee,
+    deleteEmployee,
+    employeePayments,
+    setEmployeePayments,
+    addEmployeePayment,
+    updateEmployeePayment,
+    deleteEmployeePayment,
+    resetAllData,
+    exportBackupJson,
+    generateBackupJsonString,
+    importBackupJson,
+    activeModal,
+    setActiveModal,
+    invoiceToPrint,
+    setInvoiceToPrint,
+    invoiceToEdit,
+    setInvoiceToEdit,
+    duePaymentToPrint,
+    setDuePaymentToPrint,
+    isCloudSynced,
+    cloudSyncTime,
+    isSyncingNow,
+    forceSyncFromCloud,
+    forcePushToCloud,
+    syncManagerToBranch,
+    removeUserFromBranch,
+    branches,
+    setBranches,
+    addBranch,
+    updateBranch,
+    deleteBranch,
+    addUser,
+    updateUser,
+    deleteUser,
+    firestoreQuota,
+    license,
+    isLicenseValid: licenseStatusDetails.isValid,
+    isLicenseExpired: licenseStatusDetails.isExpired,
+    licenseDaysLeft: licenseStatusDetails.daysLeft,
+    updateLicense,
+    activateLicenseKey,
+    isLicenseManagerOpen,
+    setIsLicenseManagerOpen,
+    presenceList,
+    activeOnlineUsersCount,
+    isOnlineUsersModalOpen,
+    setIsOnlineUsersModalOpen,
+    confirmDialog,
+    setConfirmDialog,
+    confirmAction
+  }), [
+    language,
+    currentTab,
+    selectedDate,
+    isAuthenticated,
+    ACTIVE_BRANCH_ID,
+    currentUser,
+    canEditOrDelete,
+    isManager,
+    users,
+    smtpSettings,
+    customers,
+    suppliers,
+    invoices,
+    duePayments,
+    supplierBills,
+    supplierPayments,
+    expenses,
+    openingCashList,
+    otherCashInList,
+    cashTallies,
+    auditLogs,
+    recycleBin,
+    products,
+    investments,
+    loans,
+    loanRepayments,
+    employees,
+    employeePayments,
+    activeModal,
+    invoiceToPrint,
+    duePaymentToPrint,
+    isCloudSynced,
+    cloudSyncTime,
+    isSyncingNow,
+    branches,
+    firestoreQuota,
+    license,
+    licenseStatusDetails.isValid,
+    licenseStatusDetails.isExpired,
+    licenseStatusDetails.daysLeft,
+    isLicenseManagerOpen,
+    presenceList,
+    activeOnlineUsersCount,
+    isOnlineUsersModalOpen,
+    confirmDialog
+  ]);
+
   return (
-    <AppContext.Provider
-      value={{
-        currentTab,
-        setCurrentTab,
-        selectedDate,
-        setSelectedDate,
-        isAuthenticated,
-        login,
-        returnToMainApp,
-        activeBranchId: ACTIVE_BRANCH_ID,
-        logout,
-        currentUser,
-        setCurrentUser,
-        users,
-        setUsers,
-        smtpSettings,
-        setSmtpSettings,
-        customers,
-        setCustomers,
-        suppliers,
-        setSuppliers,
-        invoices,
-        setInvoices,
-        duePayments,
-        setDuePayments,
-        supplierBills,
-        setSupplierBills,
-        supplierPayments,
-        setSupplierPayments,
-        expenses,
-        setExpenses,
-        openingCashList,
-        setOpeningCashList,
-        otherCashInList,
-        setOtherCashInList,
-        cashTallies,
-        setCashTallies,
-        auditLogs,
-        addAuditLog,
-        recycleBin,
-        moveToRecycleBin,
-        restoreFromRecycleBin,
-        permanentDeleteFromRecycleBin,
-        emptyRecycleBin,
-        products,
-        setProducts,
-        addCustomer,
-        addInvoice,
-        addDuePayment,
-        addSupplierBill,
-        addSupplierPayment,
-        addExpense,
-        setOpeningCash,
-        addOtherCashIn,
-        saveCashTally,
-        resetAllData,
-        exportBackupJson,
-        generateBackupJsonString,
-        importBackupJson,
-        activeModal,
-        setActiveModal,
-        invoiceToPrint,
-        setInvoiceToPrint,
-        duePaymentToPrint,
-        setDuePaymentToPrint,
-        isCloudSynced,
-        cloudSyncTime,
-        isSyncingNow,
-        forceSyncFromCloud,
-        forcePushToCloud,
-        syncManagerToBranch,
-        removeUserFromBranch,
-        branches,
-        setBranches,
-        addBranch,
-        updateBranch,
-        deleteBranch,
-        addUser,
-        updateUser,
-        deleteUser,
-        firestoreQuota,
-        license,
-        isLicenseValid: licenseStatusDetails.isValid,
-        isLicenseExpired: licenseStatusDetails.isExpired,
-        licenseDaysLeft: licenseStatusDetails.daysLeft,
-        updateLicense,
-        activateLicenseKey,
-        isLicenseManagerOpen,
-        setIsLicenseManagerOpen,
-        presenceList,
-        activeOnlineUsersCount,
-        isOnlineUsersModalOpen,
-        setIsOnlineUsersModalOpen
-      }}
-    >
+    <AppContext.Provider value={contextValue}>
       {children}
     </AppContext.Provider>
   );

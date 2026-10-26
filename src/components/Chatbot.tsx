@@ -5,7 +5,7 @@ import { useApp } from '../context/AppContext';
 export default function Chatbot() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: 'user' | 'bot'; text: string }[]>([
-    { role: 'bot', text: 'হ্যালো! আমি আপনার ML Electric অ্যাপের AI অ্যাসিস্ট্যান্ট। আমি আপনাকে অ্যাপ চালানোর নিয়মাবলি এবং আপনার দোকানের হিসাব (যেমন: আজকের বিক্রি, কার কত বাকি) জানাতে পারি। আপনি কী জানতে চান?' }
+    { role: 'bot', text: 'হ্যালো! আমি আপনার Bismillah Traders (বিসমিল্লাহ ট্রেডার্স) অ্যাপের AI অ্যাসিস্ট্যান্ট। আমি আপনাকে অ্যাপ চালানোর নিয়মাবলি এবং আপনার দোকানের হিসাব (যেমন: আজকের বিক্রি, কার কত বাকি) জানাতে পারি। আপনি কী জানতে চান?' }
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);

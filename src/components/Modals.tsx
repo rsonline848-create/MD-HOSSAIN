@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useApp } from '../context/AppContext';
+import { Invoice } from '../types';
 import { 
   X, 
   Layers, 
@@ -26,7 +27,23 @@ import {
   Edit,
   Store,
   Eye,
-  EyeOff
+  EyeOff,
+  Package,
+  Boxes,
+  Users,
+  Truck,
+  ShoppingCart,
+  CreditCard,
+  HandCoins,
+  DollarSign,
+  Scale,
+  Wallet,
+  TrendingUp,
+  Landmark,
+  ShieldCheck,
+  Clock,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 import { toBengaliNumber, toEnglishNumber, formatCurrency, formatDate, formatDateTimeBengali, normalizeDate, isSameDate, numberToBengaliWords } from '../utils/formatters';
 import { parseAndSanitizeBackup } from '../utils/backupParser';
@@ -55,15 +72,30 @@ export const Modals: React.FC = () => {
     setDuePaymentToPrint,
     setInvoiceToPrint,
     importBackupJson,
+    exportBackupJson,
     resetAllData,
     invoices,
     customers,
+    duePayments,
+    products,
+    suppliers,
+    supplierBills,
+    supplierPayments,
+    expenses,
+    cashTallies,
+    investments,
+    loans,
+    loanRepayments,
     branches,
     syncManagerToBranch,
     removeUserFromBranch,
     addUser,
     updateUser,
-    deleteUser
+    deleteUser,
+    canEditOrDelete,
+    confirmDialog,
+    setConfirmDialog,
+    confirmAction
   } = useApp();
 
   // Local state for modals
@@ -149,6 +181,29 @@ export const Modals: React.FC = () => {
   // File upload ref
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Backup Download Selection State
+  const ALL_BACKUP_CATEGORY_KEYS = [
+    'products',
+    'customers',
+    'invoices',
+    'duePayments',
+    'suppliers',
+    'supplierBills',
+    'supplierPayments',
+    'expenses',
+    'cashTallies',
+    'openingCashList',
+    'otherCashInList',
+    'investments',
+    'loans',
+    'users',
+    'recycleBin',
+    'auditLogs'
+  ];
+  const [selectedBackupCategories, setSelectedBackupCategories] = useState<string[]>(ALL_BACKUP_CATEGORY_KEYS);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [backupDownloadSearch, setBackupDownloadSearch] = useState<string>('');
+
   React.useEffect(() => {
     if (activeModal === 'reset_confirm') {
       setResetAdminPassword('');
@@ -161,6 +216,11 @@ export const Modals: React.FC = () => {
       setBackupRawContent('');
       setBackupAnalysis(null);
       setRestoreMode('overwrite');
+    }
+    if (activeModal === 'backup_download_options') {
+      setSelectedBackupCategories(ALL_BACKUP_CATEGORY_KEYS);
+      setIsExporting(false);
+      setBackupDownloadSearch('');
     }
   }, [activeModal]);
 
@@ -175,12 +235,403 @@ export const Modals: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [invoiceToPrint, duePaymentToPrint, setInvoiceToPrint, setDuePaymentToPrint]);
 
+  // Tag body to isolate print strictly to the invoice/receipt slip
+  React.useEffect(() => {
+    if (invoiceToPrint || duePaymentToPrint) {
+      document.body.classList.add('invoice-modal-open');
+    } else {
+      document.body.classList.remove('invoice-modal-open');
+    }
+    return () => {
+      document.body.classList.remove('invoice-modal-open');
+    };
+  }, [invoiceToPrint, duePaymentToPrint]);
+
   if (!activeModal && !invoiceToPrint && !duePaymentToPrint) return null;
 
-  // Print invoice helper
+  // Print invoice / receipt helper - cleanly isolates ONLY the invoice/receipt with full tabular styling
   const handlePrint = () => {
+    const targetElementId = invoiceToPrint ? 'printable-invoice' : (duePaymentToPrint ? 'printable-due-receipt' : null);
+    const targetEl = targetElementId ? document.getElementById(targetElementId) : null;
+    
+    if (targetEl) {
+      const docTitle = invoiceToPrint 
+        ? `ক্যাশ মেমো - ${invoiceToPrint.invoiceNo}` 
+        : `মানি রিসিট - ${duePaymentToPrint?.receiptNo || 'রশিদ'}`;
+      
+      try {
+        // Collect stylesheet rules from document
+        let documentStyles = '';
+        try {
+          for (let i = 0; i < document.styleSheets.length; i++) {
+            const sheet = document.styleSheets[i];
+            try {
+              const rules = sheet.cssRules || (sheet as unknown as { rules: CSSRuleList }).rules;
+              if (rules) {
+                for (let j = 0; j < rules.length; j++) {
+                  documentStyles += rules[j].cssText + '\n';
+                }
+              }
+            } catch {
+              if (sheet.href) {
+                documentStyles += `@import url("${sheet.href}");\n`;
+              }
+            }
+          }
+        } catch {
+          // Ignore stylesheet iteration issues
+        }
+
+        // Additional link tags from main document
+        const linkTags = Array.from(document.querySelectorAll('link[rel="stylesheet"]'))
+          .map(el => el.outerHTML)
+          .join('\n');
+
+        // Create or reuse isolated iframe with off-screen dimensions for full CSS rendering
+        let iframe = document.getElementById('app-isolated-print-iframe') as HTMLIFrameElement | null;
+        if (iframe) {
+          iframe.remove();
+        }
+        iframe = document.createElement('iframe');
+        iframe.id = 'app-isolated-print-iframe';
+        iframe.style.position = 'fixed';
+        iframe.style.left = '-9999px';
+        iframe.style.top = '0';
+        iframe.style.width = '850px';
+        iframe.style.height = '1100px';
+        iframe.style.opacity = '0';
+        iframe.style.pointerEvents = 'none';
+        iframe.style.border = '0';
+        iframe.style.zIndex = '-9999';
+        document.body.appendChild(iframe);
+
+        const iframeDoc = iframe.contentWindow?.document;
+        if (iframeDoc) {
+          iframeDoc.open();
+          iframeDoc.write(`
+            <!DOCTYPE html>
+            <html lang="bn">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>${docTitle}</title>
+              <link rel="preconnect" href="https://fonts.googleapis.com">
+              <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+              <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700;800;900&family=Hind+Siliguri:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+              ${linkTags}
+              <style>
+                ${documentStyles}
+              </style>
+              <style>
+                @page { 
+                  size: A4 portrait; 
+                  margin: 8mm 6mm; 
+                }
+                * { 
+                  -webkit-print-color-adjust: exact !important; 
+                  print-color-adjust: exact !important; 
+                  color-adjust: exact !important;
+                  box-sizing: border-box !important; 
+                }
+                html, body { 
+                  background: #ffffff !important; 
+                  color: #0f172a !important; 
+                  padding: 0 !important;
+                  margin: 0 !important;
+                  font-family: 'Noto Sans Bengali', 'SolaimanLipi', 'Kalpurush', 'Hind Siliguri', sans-serif !important;
+                  font-size: 13px !important;
+                  line-height: 1.4 !important;
+                }
+                .print\\:hidden { display: none !important; }
+                
+                #printable-invoice, #printable-due-receipt {
+                  background: #ffffff !important;
+                  border: 1px solid #cbd5e1 !important;
+                  border-radius: 8px !important;
+                  padding: 16px 20px !important;
+                  margin: 0 auto !important;
+                  width: 100% !important;
+                  max-width: 720px !important;
+                  box-shadow: none !important;
+                }
+
+                @media print {
+                  html, body {
+                    padding: 0 !important;
+                    margin: 0 !important;
+                  }
+                  #printable-invoice, #printable-due-receipt {
+                    border: none !important;
+                    padding: 4px !important;
+                    max-width: 100% !important;
+                    width: 100% !important;
+                  }
+                }
+
+                /* Explicit flex, grid & layout rules to guarantee tabular format */
+                .flex { display: flex !important; }
+                .grid { display: grid !important; }
+                .grid-cols-2 { 
+                  display: grid !important; 
+                  grid-template-columns: 1fr 1fr !important; 
+                  gap: 12px !important; 
+                }
+                .items-center { align-items: center !important; }
+                .justify-between { justify-content: space-between !important; }
+                .justify-end { justify-content: flex-end !important; }
+                .text-center { text-align: center !important; }
+                .text-right { text-align: right !important; }
+                .text-left { text-align: left !important; }
+                
+                /* Typography & Font Weights */
+                .font-bold { font-weight: 700 !important; }
+                .font-semibold { font-weight: 600 !important; }
+                .font-medium { font-weight: 500 !important; }
+                .font-extrabold, .font-black { font-weight: 800 !important; }
+                .font-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; }
+
+                .text-2xl, .text-3xl { font-size: 24px !important; line-height: 1.2 !important; }
+                .text-lg { font-size: 16px !important; }
+                .text-base { font-size: 14px !important; }
+                .text-sm { font-size: 13px !important; }
+                .text-xs { font-size: 11.5px !important; }
+                .text-\\[10px\\] { font-size: 10px !important; }
+                .text-\\[11px\\] { font-size: 11px !important; }
+
+                /* Tables & Borders */
+                table {
+                  width: 100% !important;
+                  border-collapse: collapse !important;
+                  margin: 10px 0 !important;
+                  font-size: 12px !important;
+                }
+                th, td {
+                  border: 1px solid #94a3b8 !important;
+                  padding: 6px 8px !important;
+                  vertical-align: middle !important;
+                }
+                th {
+                  background-color: #f1f5f9 !important;
+                  color: #0f172a !important;
+                  font-weight: 700 !important;
+                  border-bottom: 2px solid #0f172a !important;
+                }
+                thead tr {
+                  border-bottom: 2px solid #0f172a !important;
+                }
+                tfoot tr {
+                  background-color: #f8fafc !important;
+                  font-weight: 700 !important;
+                  border-top: 2px solid #0f172a !important;
+                }
+                tbody tr:nth-child(even) {
+                  background-color: #f8fafc !important;
+                }
+
+                /* Spacing and borders */
+                .space-y-0\\.5 > * + * { margin-top: 2px !important; }
+                .space-y-1 > * + * { margin-top: 4px !important; }
+                .space-y-1\\.5 > * + * { margin-top: 6px !important; }
+                .space-y-2 > * + * { margin-top: 8px !important; }
+                .space-y-4 > * + * { margin-top: 16px !important; }
+
+                .border { border: 1px solid #cbd5e1 !important; }
+                .border-b { border-bottom: 1px solid #e2e8f0 !important; }
+                .border-t { border-top: 1px solid #cbd5e1 !important; }
+                .border-b-2 { border-bottom: 2px solid #0f172a !important; }
+                .border-t-2 { border-top: 2px solid #0f172a !important; }
+
+                .border-slate-200 { border-color: #e2e8f0 !important; }
+                .border-slate-300 { border-color: #cbd5e1 !important; }
+                .border-slate-400 { border-color: #94a3b8 !important; }
+                .border-slate-800 { border-color: #1e293b !important; }
+                .border-slate-900 { border-color: #0f172a !important; }
+                .border-purple-200 { border-color: #e9d5ff !important; }
+                .border-emerald-300 { border-color: #6ee7b7 !important; }
+                .border-rose-400 { border-color: #fb7185 !important; }
+
+                /* Backgrounds */
+                .bg-white { background-color: #ffffff !important; }
+                .bg-slate-50, .bg-slate-50\\/70, .bg-slate-50\\/40 { background-color: #f8fafc !important; }
+                .bg-slate-100 { background-color: #f1f5f9 !important; }
+                .bg-indigo-50 { background-color: #eef2ff !important; }
+                .bg-emerald-50, .bg-emerald-50\\/80 { background-color: #ecfdf5 !important; }
+                .bg-emerald-100 { background-color: #d1fae5 !important; }
+                .bg-pink-50, .bg-pink-50\\/70 { background-color: #fdf2f8 !important; }
+                .bg-purple-50, .bg-purple-100\\/60 { background-color: #faf5ff !important; }
+                .bg-rose-50, .bg-rose-50\\/80 { background-color: #fff1f2 !important; }
+
+                /* Colors */
+                .text-slate-500 { color: #64748b !important; }
+                .text-slate-600 { color: #475569 !important; }
+                .text-slate-700 { color: #334155 !important; }
+                .text-slate-800 { color: #1e293b !important; }
+                .text-slate-900 { color: #0f172a !important; }
+                .text-indigo-800 { color: #3730a3 !important; font-weight: 700 !important; }
+                .text-indigo-900 { color: #312e81 !important; font-weight: 700 !important; }
+                .text-emerald-700, .text-emerald-800, .text-emerald-950 { color: #047857 !important; font-weight: 700 !important; }
+                .text-rose-600, .text-rose-700 { color: #be123c !important; font-weight: 700 !important; }
+                .text-amber-700, .text-amber-800 { color: #b45309 !important; font-weight: 700 !important; }
+                .text-purple-800, .text-purple-900, .text-purple-950 { color: #6b21a8 !important; font-weight: 700 !important; }
+                .text-pink-700 { color: #be185d !important; font-weight: 700 !important; }
+
+                /* Sizing & spacing */
+                .w-full { width: 100% !important; }
+                .w-8 { width: 32px !important; }
+                .w-20 { width: 80px !important; }
+                .w-24 { width: 96px !important; }
+                .w-32 { width: 128px !important; }
+                .w-64 { width: 260px !important; }
+                .mx-auto { margin-left: auto !important; margin-right: auto !important; }
+                .rounded { border-radius: 4px !important; }
+                .rounded-md { border-radius: 6px !important; }
+                .rounded-lg { border-radius: 8px !important; }
+                .rounded-xl { border-radius: 12px !important; }
+
+                .p-1\\.5 { padding: 6px !important; }
+                .p-2 { padding: 8px !important; }
+                .p-2\\.5 { padding: 10px !important; }
+                .p-4 { padding: 16px !important; }
+                .px-1\\.5 { padding-left: 6px !important; padding-right: 6px !important; }
+                .px-2\\.5 { padding-left: 10px !important; padding-right: 10px !important; }
+                .px-3 { padding-left: 12px !important; padding-right: 12px !important; }
+                .py-0\\.5 { padding-top: 2px !important; padding-bottom: 2px !important; }
+                .py-1 { padding-top: 4px !important; padding-bottom: 4px !important; }
+                .py-1\\.5 { padding-top: 6px !important; padding-bottom: 6px !important; }
+                .pt-1 { padding-top: 4px !important; }
+                .pt-1\\.5 { padding-top: 6px !important; }
+                .pt-2 { padding-top: 8px !important; }
+                .pt-8 { padding-top: 32px !important; }
+                .pb-1 { padding-bottom: 4px !important; }
+                .pb-2\\.5 { padding-bottom: 10px !important; }
+                .pb-3 { padding-bottom: 12px !important; }
+                
+                table, tr, td, th { page-break-inside: avoid !important; }
+              </style>
+            </head>
+            <body>
+              <div id="${targetElementId}">
+                ${targetEl.innerHTML}
+              </div>
+            </body>
+            </html>
+          `);
+          iframeDoc.close();
+
+          // Wait for Google Font and DOM to render before calling print
+          setTimeout(() => {
+            try {
+              iframe?.contentWindow?.focus();
+              iframe?.contentWindow?.print();
+            } catch (err) {
+              console.warn('Iframe print failed, falling back to window.print():', err);
+              document.body.classList.add('printing-modal-only');
+              window.print();
+              setTimeout(() => document.body.classList.remove('printing-modal-only'), 1000);
+            }
+          }, 350);
+          return;
+        }
+      } catch (err) {
+        console.warn('Isolated print setup failed, falling back to window.print():', err);
+      }
+    }
+
+    // Direct window fallback (CSS isolation hides background data)
+    document.body.classList.add('printing-modal-only');
     window.print();
+    setTimeout(() => {
+      document.body.classList.remove('printing-modal-only');
+    }, 1000);
   };
+
+  // Calculate customer's previous due, current due, and total outstanding due for invoiceToPrint
+  const getInvoiceDueBreakdown = (inv: Invoice | null) => {
+    if (!inv) return { previousDue: 0, currentDue: 0, totalDue: 0 };
+    
+    const curDue = Number(inv.dueAmount) || 0;
+
+    if (inv.previousDue !== undefined) {
+      const prev = Number(inv.previousDue) || 0;
+      const tot = inv.totalDue !== undefined ? Number(inv.totalDue) : (prev + curDue);
+      return { previousDue: prev, currentDue: curDue, totalDue: tot };
+    }
+
+    const cust = customers.find(c => (inv.customerId && c.id === inv.customerId) || (c.name && c.name === inv.customerName));
+    if (!cust) {
+      return { previousDue: 0, currentDue: curDue, totalDue: curDue };
+    }
+
+    const custInvoices = invoices.filter(i => i.customerId === cust.id || i.customerName === cust.name);
+    const custPayments = duePayments.filter(dp => dp.customerId === cust.id || dp.customerName === cust.name);
+
+    const timeline: Array<{ id: string; date: string; netSale: number; paid: number; discount: number; isTarget: boolean }> = [];
+    custInvoices.forEach(i => {
+      timeline.push({
+        id: i.id,
+        date: i.date || '',
+        netSale: i.grandTotal || 0,
+        paid: (i.cashPaid || 0) + (i.onlinePaid || 0),
+        discount: 0,
+        isTarget: i.id === inv.id || (i.invoiceNo === inv.invoiceNo && i.date === inv.date)
+      });
+    });
+    custPayments.forEach(p => {
+      timeline.push({
+        id: p.id,
+        date: p.date || '',
+        netSale: 0,
+        paid: (p.cashPaid ?? 0) + (p.onlinePaid ?? (p.paymentMethod !== 'cash' ? p.amount : 0)),
+        discount: p.discount || 0,
+        isTarget: false
+      });
+    });
+
+    timeline.sort((a, b) => a.date.localeCompare(b.date));
+
+    let running = cust.openingDue || 0;
+    let matched = false;
+    let foundPrev = 0;
+    let foundTotal = 0;
+
+    for (const item of timeline) {
+      if (item.isTarget) {
+        foundPrev = running;
+        running = Math.max(0, running + item.netSale - item.paid - item.discount);
+        foundTotal = running;
+        matched = true;
+        break;
+      }
+      running = Math.max(0, running + item.netSale - item.paid - item.discount);
+    }
+
+    if (matched) {
+      return { previousDue: foundPrev, currentDue: curDue, totalDue: foundTotal };
+    }
+
+    const prev = Math.max(0, (cust.currentDue || 0) - curDue);
+    return {
+      previousDue: prev,
+      currentDue: curDue,
+      totalDue: cust.currentDue || (prev + curDue)
+    };
+  };
+
+  const invoiceDueBreakdown = invoiceToPrint ? getInvoiceDueBreakdown(invoiceToPrint) : null;
+
+  // Invoice Weight & Exchange Breakdown
+  const isExchangeInvoice = invoiceToPrint ? (
+    Boolean(invoiceToPrint.notes?.includes('এক্সচেঞ্জ') || invoiceToPrint.items?.some(i => i.name?.includes('[ফেরত মাল]') || i.name?.includes('[নতুন মাল]')))
+  ) : false;
+  const returnWeightKg = invoiceToPrint ? (
+    invoiceToPrint.items?.filter(i => i.name?.includes('[ফেরত মাল]')).reduce((s, it) => s + (Number(it.quantity) || 0), 0) || 0
+  ) : 0;
+  const newDeliveryWeightKg = invoiceToPrint ? (
+    invoiceToPrint.items?.filter(i => i.name?.includes('[নতুন মাল]')).reduce((s, it) => s + (Number(it.quantity) || 0), 0) || 0
+  ) : 0;
+  const totalInvoiceKg = invoiceToPrint ? (
+    invoiceToPrint.items?.reduce((s, it) => s + (Number(it.quantity) || 0), 0) || 0
+  ) : 0;
 
   return (
     <>
@@ -532,10 +983,13 @@ export const Modals: React.FC = () => {
                                 </button>
                                 {users.length > 1 && u.id !== 'u_admin_1' && (
                                   <button
-                                    onClick={async () => {
-                                      if (window.confirm(`আপনি কি নিশ্চিত যে "${u.name}" এর অ্যাকাউন্টটি মুছে ফেলতে চান?`)) {
-                                        await deleteUser(u.id);
-                                      }
+                                    onClick={() => {
+                                      confirmAction({
+                                        title: 'ব্যবহারকারী অ্যাকাউন্ট মুছে ফেলা',
+                                        message: `আপনি কি নিশ্চিত যে "${u.name}" এর অ্যাকাউন্টটি মুছে ফেলতে চান?`,
+                                        confirmLabel: 'হ্যাঁ, ডিলিট করুন',
+                                        onConfirm: () => deleteUser(u.id)
+                                      });
                                     }}
                                     className="p-1 text-rose-600 bg-rose-50 border border-rose-200/60 rounded-md hover:bg-rose-100 cursor-pointer transition"
                                     title="ডিলিট করুন"
@@ -752,7 +1206,7 @@ export const Modals: React.FC = () => {
                   onChange={(e) => setMgrBranchId(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-indigo-500 outline-none cursor-pointer"
                 >
-                  <option value="ml_electric_main">প্রধান শাখা (ML Electric)</option>
+                  <option value="ml_electric_main">প্রধান শাখা (Bismillah Traders)</option>
                   {branches.map(branch => (
                     <option key={branch.id} value={branch.id}>
                       {branch.name} {branch.location ? `(${branch.location})` : ''}
@@ -943,7 +1397,7 @@ export const Modals: React.FC = () => {
                   onChange={(e) => setMgrBranchId(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
                 >
-                  <option value="ml_electric_main">প্রধান শাখা (ML Electric)</option>
+                  <option value="ml_electric_main">প্রধান শাখা (Bismillah Traders)</option>
                   {branches.map(branch => (
                     <option key={branch.id} value={branch.id}>
                       {branch.name} {branch.location ? `(${branch.location})` : ''}
@@ -1155,23 +1609,32 @@ export const Modals: React.FC = () => {
                         </td>
                         <td className="p-2.5 text-center">
                           <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              onClick={() => {
-                                restoreFromRecycleBin(item.id);
-                              }}
-                              className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-bold flex items-center gap-1 transition shadow-sm cursor-pointer"
-                              title="পুনরুদ্ধার করুন"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>রিস্টোর</span>
-                            </button>
+                            {canEditOrDelete ? (
+                              <button
+                                onClick={() => {
+                                  restoreFromRecycleBin(item.id);
+                                }}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded text-xs font-bold flex items-center gap-1 transition shadow-sm cursor-pointer"
+                                title="পুনরুদ্ধার করুন"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>রিস্টোর</span>
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 font-medium px-2 py-0.5 bg-slate-100 rounded border border-slate-200">
+                                🔒 সুরক্ষিত
+                              </span>
+                            )}
                             {/* Delete button only visible to admin, hidden for manager role */}
                             {currentUser?.role === 'admin' && (
                               <button
                                 onClick={() => {
-                                  if (window.confirm(`আপনি কি নিশ্চিত "${item.name}" রিসাইকেল বিন থেকে চিরতরে মুছে ফেলতে চান?`)) {
-                                    permanentDeleteFromRecycleBin(item.id);
-                                  }
+                                  confirmAction({
+                                    title: 'স্থায়ীভাবে মুছে ফেলা',
+                                    message: `আপনি কি নিশ্চিত "${item.name}" রিসাইকেল বিন থেকে চিরতরে মুছে ফেলতে চান? এটি আর ফিরিয়ে আনা যাবে না।`,
+                                    confirmLabel: 'হ্যাঁ, চিরতরে মুছুন',
+                                    onConfirm: () => permanentDeleteFromRecycleBin(item.id)
+                                  });
                                 }}
                                 className="bg-rose-100 hover:bg-rose-200 text-rose-700 px-2 py-1 rounded text-xs font-bold flex items-center gap-1 transition shadow-2xs cursor-pointer"
                                 title="স্থায়ীভাবে মুছুন"
@@ -1195,9 +1658,12 @@ export const Modals: React.FC = () => {
                 recycleBin.length > 0 && (
                   <button
                     onClick={() => {
-                      if (window.confirm('আপনি কি নিশ্চিত রিসাইকেল বিন সম্পূর্ণ খালি করতে চান? এটি আর ফিরিয়ে আনা যাবে না।')) {
-                        emptyRecycleBin();
-                      }
+                      confirmAction({
+                        title: 'রিসাইকেল বিন সম্পূর্ণ খালি করা',
+                        message: 'আপনি কি নিশ্চিত রিসাইকেল বিন সম্পূর্ণ খালি করতে চান? ভেতরের সমস্ত ডেটা চিরতরে মুছে যাবে এবং এটি আর ফিরিয়ে আনা যাবে না।',
+                        confirmLabel: 'হ্যাঁ, বিন খালি করুন',
+                        onConfirm: () => emptyRecycleBin()
+                      });
                     }}
                     className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-700 font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer"
                   >
@@ -1221,6 +1687,415 @@ export const Modals: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* 7.5. Selective Backup Download Options Modal */}
+      {activeModal === 'backup_download_options' && (() => {
+        const backupCategoriesList = [
+          {
+            key: 'products',
+            title: 'প্রোডাক্ট ক্যাটালগ ও স্টক',
+            titleEn: 'Products & Stock',
+            desc: 'সকল পণ্যের নাম, সাইজ, ক্রয়মূল্য, বিক্রয়মূল্য ও বর্তমান স্টক',
+            count: products.length,
+            unit: 'টি পণ্য',
+            icon: Package,
+            badgeColor: 'bg-purple-100 text-purple-700 border-purple-200'
+          },
+          {
+            key: 'customers',
+            title: 'কাস্টমার প্রোফাইল ও বকেয়া',
+            titleEn: 'Customers & Dues',
+            desc: 'সকল কাস্টমারদের নাম, ফোন, ঠিকানা ও পূর্বের/বর্তমান বাকি',
+            count: customers.length,
+            unit: 'জন কাস্টমার',
+            icon: Users,
+            badgeColor: 'bg-blue-100 text-blue-700 border-blue-200'
+          },
+          {
+            key: 'invoices',
+            title: 'বিক্রয় চালান ও মেমো',
+            titleEn: 'Sales Invoices',
+            desc: 'সকল বিক্রয় মেমো, আইটেম বিবরণ, জমা, বাকি ও চালান তথ্য',
+            count: invoices.length,
+            unit: 'টি মেমো',
+            icon: FileText,
+            badgeColor: 'bg-indigo-100 text-indigo-700 border-indigo-200'
+          },
+          {
+            key: 'duePayments',
+            title: 'বাকি আদায় ও পেমেন্ট রসিদ',
+            titleEn: 'Due Collections',
+            desc: 'কাস্টমারদের নিকট থেকে বকেয়া আদায় ও মানি রিসিট',
+            count: duePayments.length,
+            unit: 'টি রশিদ',
+            icon: HandCoins,
+            badgeColor: 'bg-emerald-100 text-emerald-700 border-emerald-200'
+          },
+          {
+            key: 'suppliers',
+            title: 'মহাজন / সাপ্লায়ার প্রোফাইল',
+            titleEn: 'Suppliers Profile',
+            desc: 'মহাজনদের নাম, প্রতিষ্ঠান, মোবাইল, মোট ক্রয়, পরিশোধ ও বর্তমান দেনা',
+            count: suppliers.length,
+            unit: 'জন মহাজন',
+            icon: Truck,
+            badgeColor: 'bg-amber-100 text-amber-700 border-amber-200'
+          },
+          {
+            key: 'supplierBills',
+            title: 'মাল ক্রয় ও মহাজন বিলসমূহ',
+            titleEn: 'Purchase Bills',
+            desc: 'সাপ্লায়ার থেকে মালামাল ক্রয়ের মেমো, ক্রয়মূল্য ও চালান ভাউচার',
+            count: supplierBills.length,
+            unit: 'টি বিল',
+            icon: ShoppingCart,
+            badgeColor: 'bg-orange-100 text-orange-700 border-orange-200'
+          },
+          {
+            key: 'supplierPayments',
+            title: 'মহাজন দেনা পরিশোধ রসিদ',
+            titleEn: 'Supplier Payments',
+            desc: 'মহাজনদের নগদ ও ব্যাংক মাধ্যমে বকেয়া পরিশোধের রসিদ',
+            count: supplierPayments.length,
+            unit: 'টি ভাউচার',
+            icon: CreditCard,
+            badgeColor: 'bg-teal-100 text-teal-700 border-teal-200'
+          },
+          {
+            key: 'expenses',
+            title: 'দোকান ও ব্যবসা খরচ',
+            titleEn: 'Shop Expenses',
+            desc: 'দৈনিক দোকান ভাড়া, বিদ্যুৎ বিল, কর্মচারীর বেতন ও যাবতীয় খরচ',
+            count: expenses.length,
+            unit: 'টি খরচ রেকর্ড',
+            icon: DollarSign,
+            badgeColor: 'bg-rose-100 text-rose-700 border-rose-200'
+          },
+          {
+            key: 'cashTallies',
+            title: 'ক্যাশ ও ব্যাংক মিলানোর রেকর্ড',
+            titleEn: 'Cash & Bank Tallies',
+            desc: 'প্রতিদিনের ক্যাশ ড্রয়ার মিলানো ও ব্যাংক জমা-খরচের খতিয়ান',
+            count: cashTallies.length,
+            unit: 'টি রেকর্ড',
+            icon: Scale,
+            badgeColor: 'bg-cyan-100 text-cyan-700 border-cyan-200'
+          },
+          {
+            key: 'openingCashList',
+            title: 'শুরুর ক্যাশ (Opening Cash)',
+            titleEn: 'Daily Opening Cash',
+            desc: 'তারিখভিত্তিক সকালের ড্রয়ার ক্যাশ ওপেনিং টাকার খতিয়ান',
+            count: openingCashList.length,
+            unit: 'টি এন্ট্রি',
+            icon: Wallet,
+            badgeColor: 'bg-sky-100 text-sky-700 border-sky-200'
+          },
+          {
+            key: 'otherCashInList',
+            title: 'অন্যান্য ক্যাশ ইন রেকর্ড',
+            titleEn: 'Other Cash In',
+            desc: 'বিক্রয় ও বাকি আদায় ব্যতীত দোকানে অন্যান্য নগদ জমার তালিকা',
+            count: otherCashInList.length,
+            unit: 'টি এন্ট্রি',
+            icon: ArrowDownCircle,
+            badgeColor: 'bg-violet-100 text-violet-700 border-violet-200'
+          },
+          {
+            key: 'investments',
+            title: 'ব্যবসায় মূলধন ও বিনিয়োগ',
+            titleEn: 'Investments & Capital',
+            desc: 'ব্যবসায় অংশীদারদের মূলধন বিনিয়োগ ও শেয়ার জমার বিবরণ',
+            count: investments.length,
+            unit: 'টি বিনিয়োগ',
+            icon: TrendingUp,
+            badgeColor: 'bg-lime-100 text-lime-800 border-lime-200'
+          },
+          {
+            key: 'loans',
+            title: 'ব্যাংক ও ব্যক্তিগত ঋণ ও কিস্তি',
+            titleEn: 'Loans & Repayments',
+            desc: 'ব্যাংক ও ব্যক্তিগত ঋণের রেকর্ড এবং পরিশোধিত কিস্তির হিসাব',
+            count: loans.length + (loanRepayments?.length || 0),
+            unit: 'টি রেকর্ড',
+            icon: Landmark,
+            badgeColor: 'bg-yellow-100 text-yellow-800 border-yellow-200'
+          },
+          {
+            key: 'users',
+            title: 'ইউজার ও স্টাফ একাউন্ট',
+            titleEn: 'Users & Permissions',
+            desc: 'অ্যাডমিন ও ব্রাঞ্চ ম্যানেজারদের লগইন একাউন্ট ও পারমিশন',
+            count: users.length,
+            unit: 'টি একাউন্ট',
+            icon: ShieldCheck,
+            badgeColor: 'bg-slate-100 text-slate-700 border-slate-200'
+          },
+          {
+            key: 'recycleBin',
+            title: 'রিসাইকেল বিন (মুছে ফেলা ডাটা)',
+            titleEn: 'Recycle Bin Data',
+            desc: 'সাময়িকভাবে মুছে ফেলা ইনভয়েস, বিল ও খরচের সংরক্ষিত হিস্ট্রি',
+            count: recycleBin.length,
+            unit: 'টি আইটেম',
+            icon: Trash2,
+            badgeColor: 'bg-red-100 text-red-700 border-red-200'
+          },
+          {
+            key: 'auditLogs',
+            title: 'অডিট লগ ও সিস্টেম অ্যাক্টিভিটি',
+            titleEn: 'Audit Logs & History',
+            desc: 'সকল ব্যবহারকারীর কার্যক্রম, ডাটা এন্ট্রি ও এডিটের টাইমস্ট্যাম্প লগ',
+            count: auditLogs.length,
+            unit: 'টি লগ',
+            icon: Clock,
+            badgeColor: 'bg-zinc-100 text-zinc-700 border-zinc-200'
+          }
+        ];
+
+        const isAllSelected = selectedBackupCategories.length === ALL_BACKUP_CATEGORY_KEYS.length;
+        const isNoneSelected = selectedBackupCategories.length === 0;
+
+        const handleMasterToggle = () => {
+          if (isAllSelected) {
+            setSelectedBackupCategories([]);
+          } else {
+            setSelectedBackupCategories(ALL_BACKUP_CATEGORY_KEYS);
+          }
+        };
+
+        const handleToggleCategory = (key: string) => {
+          setSelectedBackupCategories(prev => 
+            prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+          );
+        };
+
+        const handleSelectAll = () => {
+          setSelectedBackupCategories(ALL_BACKUP_CATEGORY_KEYS);
+        };
+
+        const handleDeselectAll = () => {
+          setSelectedBackupCategories([]);
+        };
+
+        const handleDownload = async () => {
+          if (selectedBackupCategories.length === 0) return;
+          setIsExporting(true);
+          try {
+            await exportBackupJson(selectedBackupCategories);
+            setTimeout(() => {
+              setIsExporting(false);
+              setActiveModal(null);
+            }, 600);
+          } catch (err) {
+            console.error('Backup download error:', err);
+            setIsExporting(false);
+          }
+        };
+
+        const filteredList = backupDownloadSearch.trim()
+          ? backupCategoriesList.filter(c => 
+              c.title.toLowerCase().includes(backupDownloadSearch.toLowerCase()) ||
+              c.titleEn.toLowerCase().includes(backupDownloadSearch.toLowerCase()) ||
+              c.desc.toLowerCase().includes(backupDownloadSearch.toLowerCase())
+            )
+          : backupCategoriesList;
+
+        return (
+          <div 
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setActiveModal(null);
+            }}
+            className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3 sm:p-4 backdrop-blur-xs animate-in fade-in"
+          >
+            <div className="bg-white rounded-2xl sm:rounded-3xl max-w-3xl w-full overflow-hidden shadow-2xl animate-in zoom-in-95 border border-slate-200 flex flex-col max-h-[92vh]">
+              
+              {/* Header */}
+              <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-purple-800 p-4 sm:p-5 text-white flex items-center justify-between shadow-xs shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 sm:w-11 sm:h-11 bg-white/20 rounded-xl sm:rounded-2xl flex items-center justify-center flex-shrink-0 text-white shadow-inner">
+                    <Download className="w-5 h-5 sm:w-6 sm:h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                      <span>ব্যাকআপ ডাউনলোড অপশন (Selective Backup)</span>
+                      <span className="text-[11px] bg-white/20 font-mono px-2 py-0.5 rounded-full font-bold">
+                        JSON
+                      </span>
+                    </h3>
+                    <p className="text-[11px] sm:text-xs text-blue-100 mt-0.5">
+                      যে যে তথ্যের ব্যাকআপ ডাউনলোড করতে চান তা টিক দিন অথবা একসাথে সব সিলেক্ট করুন
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setActiveModal(null)} 
+                  className="text-white/80 hover:text-white p-1.5 hover:bg-white/10 rounded-xl transition cursor-pointer"
+                  title="বন্ধ করুন (Esc)"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Master Toolbar */}
+              <div className="bg-slate-50 border-b border-slate-200 p-3 sm:px-5 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Select All Toggle Button */}
+                  <button
+                    type="button"
+                    onClick={handleMasterToggle}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs border ${
+                      isAllSelected 
+                        ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700' 
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    {isAllSelected ? (
+                      <>
+                        <CheckSquare className="w-4 h-4" />
+                        <span>সবগুলো নির্বাচিত (Select All ✓)</span>
+                      </>
+                    ) : (
+                      <>
+                        <Square className="w-4 h-4" />
+                        <span>সবগুলো নির্বাচন করুন (Select All)</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Deselect button */}
+                  {!isNoneSelected && (
+                    <button
+                      type="button"
+                      onClick={handleDeselectAll}
+                      className="px-2.5 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition cursor-pointer"
+                    >
+                      সব বাতিল (Deselect)
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-extrabold px-3 py-1 rounded-full border shadow-2xs ${
+                    selectedBackupCategories.length > 0 
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300' 
+                      : 'bg-rose-50 text-rose-700 border-rose-300'
+                  }`}>
+                    নির্বাচিত: {toBengaliNumber(selectedBackupCategories.length)} / {toBengaliNumber(backupCategoriesList.length)} টি
+                  </span>
+                </div>
+              </div>
+
+              {/* Scrollable Categories List */}
+              <div className="p-3 sm:p-5 overflow-y-auto space-y-3 flex-1 bg-slate-50/50">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {filteredList.map((cat) => {
+                    const isChecked = selectedBackupCategories.includes(cat.key);
+                    const IconComponent = cat.icon;
+
+                    return (
+                      <div
+                        key={cat.key}
+                        onClick={() => handleToggleCategory(cat.key)}
+                        className={`p-3 rounded-2xl border transition cursor-pointer select-none flex items-start gap-3 shadow-2xs relative ${
+                          isChecked 
+                            ? 'bg-white border-blue-400 ring-2 ring-blue-500/20 shadow-xs' 
+                            : 'bg-white/80 border-slate-200 hover:border-slate-300 opacity-70 hover:opacity-100'
+                        }`}
+                      >
+                        {/* Custom Checkbox */}
+                        <div className="pt-0.5 shrink-0">
+                          <div className={`w-5 h-5 rounded-lg border flex items-center justify-center transition ${
+                            isChecked 
+                              ? 'bg-blue-600 border-blue-600 text-white' 
+                              : 'bg-white border-slate-300 text-transparent'
+                          }`}>
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          </div>
+                        </div>
+
+                        {/* Icon */}
+                        <div className={`p-2 rounded-xl shrink-0 border ${cat.badgeColor}`}>
+                          <IconComponent className="w-4 h-4" />
+                        </div>
+
+                        {/* Text info */}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1 mb-0.5">
+                            <h4 className="text-xs sm:text-sm font-bold text-slate-800 truncate">
+                              {cat.title}
+                            </h4>
+                            <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 shrink-0 font-mono">
+                              {toBengaliNumber(cat.count)} {cat.unit}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 leading-tight line-clamp-1">
+                            {cat.desc}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Bottom Footer Action Bar */}
+              <div className="bg-white border-t border-slate-200 p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+                <div className="text-xs">
+                  {selectedBackupCategories.length === 0 ? (
+                    <span className="text-rose-600 font-bold flex items-center gap-1.5 animate-pulse">
+                      <AlertTriangle className="w-4 h-4 shrink-0" />
+                      <span>অনুগ্রহ করে কমপক্ষে ১টি ক্যাটাগরি টিক দিন!</span>
+                    </span>
+                  ) : isAllSelected ? (
+                    <span className="text-emerald-700 font-bold flex items-center gap-1.5">
+                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>পূর্ণাঙ্গ ডাটাবেজ ব্যাকআপ ফাইল প্রস্তুত ({toBengaliNumber(ALL_BACKUP_CATEGORY_KEYS.length)}টি ক্যাটাগরি)</span>
+                    </span>
+                  ) : (
+                    <span className="text-blue-700 font-bold flex items-center gap-1.5">
+                      <CheckCircle className="w-4 h-4 text-blue-600 shrink-0" />
+                      <span>নির্বাচিত {toBengaliNumber(selectedBackupCategories.length)}টি ক্যাটাগরির কাস্টম ব্যাকআপ প্রস্তুত</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setActiveModal(null)}
+                    className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                  >
+                    বাতিল
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={selectedBackupCategories.length === 0 || isExporting}
+                    onClick={handleDownload}
+                    className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold text-white shadow-md transition flex items-center gap-2 cursor-pointer ${
+                      selectedBackupCategories.length === 0 || isExporting
+                        ? 'bg-slate-400 cursor-not-allowed opacity-60'
+                        : 'bg-blue-600 hover:bg-blue-700 active:scale-95'
+                    }`}
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>
+                      {isExporting 
+                        ? 'ডাউনলোড হচ্ছে...' 
+                        : isAllSelected 
+                        ? 'সকল ডাটা ব্যাকআপ ডাউনলোড (.json)' 
+                        : `নির্বাচিত ব্যাকআপ ডাউনলোড (${toBengaliNumber(selectedBackupCategories.length)}টি)`
+                      }
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 8. Backup Upload & Restore Modal */}
       {activeModal === 'backup_upload' && (
@@ -1718,7 +2593,7 @@ export const Modals: React.FC = () => {
           onClick={(e) => {
             if (e.target === e.currentTarget) setInvoiceToPrint(null);
           }}
-          className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto print:p-0 print:bg-white print:static"
+          className="fixed inset-0 bg-black/70 z-[70] flex items-center justify-center p-2 sm:p-4 overflow-y-auto print:p-0 print:bg-white print:static"
         >
           <div className="bg-white rounded-2xl max-w-xl w-full p-4 sm:p-6 space-y-4 shadow-2xl print:shadow-none print:max-w-none print:w-full print:rounded-none my-auto">
             
@@ -1750,18 +2625,21 @@ export const Modals: React.FC = () => {
             <div id="printable-invoice" className="border border-slate-300 rounded-xl p-4 sm:p-6 space-y-4 bg-white text-slate-800 print:border-none print:p-0">
               {/* Shop Header */}
               <div className="text-center border-b-2 border-slate-900 pb-3 space-y-1">
-                <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-wide">ML Electric</h2>
-                <h3 className="text-base sm:text-lg font-bold text-slate-800">(এম এল ইলেকট্রিক)</h3>
-                <p className="text-xs sm:text-sm font-semibold text-slate-700">সকল প্রকার ইলেকট্রিক মালামাল সরবরাহকারী ও বিক্রেতা</p>
+                <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-wide">Bismillah Traders</h2>
+                <h3 className="text-base sm:text-lg font-bold text-slate-800">(বিসমিল্লাহ ট্রেডার্স)</h3>
+                <p className="text-xs sm:text-sm font-semibold text-slate-700">পাইকারী ও খুচরা বিক্রেতা</p>
                 <p className="text-[11px] sm:text-xs text-slate-600 font-medium leading-relaxed mt-1">
-                  মোবাইল: 01860313575,01937035340,01568394900 | ঠিকানা: ১৫০৬, দক্ষিন দনিয়া, পাটেরবাগ রোড, কদমতলী, ধাকা-১২৩৬
+                  ঠিকানা: ১৪৭০, নতুন এ. কে. স্কুল রোড, দক্ষিণ দনিয়া, কদমতলী, ঢাকা-১২৩৬
+                </p>
+                <p className="text-[11px] sm:text-xs text-slate-700 font-semibold font-mono">
+                  মোবাইল: 01885926704, 01718042483, 01720640137
                 </p>
               </div>
 
               {/* Title Badge */}
               <div className="bg-slate-100 border border-slate-300 rounded py-1 px-3 text-center">
                 <span className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-800">
-                  ক্যাশ মেমো / ইনভয়েস
+                  {isExchangeInvoice ? 'পণ্য পরিবর্তন / এক্সচেঞ্জ ও মাল ফেরত ভাউচার' : 'ক্যাশ মেমো / ইনভয়েস'}
                 </span>
               </div>
 
@@ -1785,7 +2663,7 @@ export const Modals: React.FC = () => {
                   <tr className="border-b-2 border-slate-800 font-bold bg-slate-50 text-slate-800">
                     <th className="p-1.5 w-8 text-center border-b border-slate-300">নং</th>
                     <th className="p-1.5 border-b border-slate-300">পণ্যের বিবরণ</th>
-                    <th className="p-1.5 w-16 text-center border-b border-slate-300">পরিমাণ</th>
+                    <th className="p-1.5 w-20 text-center border-b border-slate-300">পরিমাণ / ওজন</th>
                     <th className="p-1.5 w-20 text-right border-b border-slate-300">দর (৳)</th>
                     <th className="p-1.5 w-24 text-right border-b border-slate-300">মোট (৳)</th>
                   </tr>
@@ -1793,14 +2671,25 @@ export const Modals: React.FC = () => {
                 <tbody className="divide-y divide-slate-200">
                   {invoiceToPrint.items.map((item, idx) => (
                     <tr key={idx}>
-                      <td className="p-1.5 text-center text-slate-500">{toBengaliNumber(idx + 1)}</td>
+                      <td className="p-1.5 text-center font-bold text-slate-900">{toBengaliNumber(idx + 1)}</td>
                       <td className="p-1.5 font-medium">{item.name}</td>
-                      <td className="p-1.5 text-center">{toBengaliNumber(item.quantity)} {item.unit}</td>
+                      <td className="p-1.5 text-center font-bold text-slate-800">{toBengaliNumber(item.quantity)} {item.unit || 'কেজি'}</td>
                       <td className="p-1.5 text-right">{toBengaliNumber(item.unitPrice)} ৳</td>
                       <td className="p-1.5 text-right font-bold">{toBengaliNumber(item.totalPrice)} ৳</td>
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-slate-800 font-bold bg-slate-50 text-slate-900">
+                    <td colSpan={2} className="p-1.5 text-right font-bold">মোট পরিমাণ (ওজন):</td>
+                    <td className="p-1.5 text-center font-extrabold text-purple-900 bg-purple-100/60 border border-purple-200">
+                      {toBengaliNumber(totalInvoiceKg)} কেজি
+                    </td>
+                    <td colSpan={2} className="p-1.5 text-right font-extrabold text-indigo-900">
+                      {toBengaliNumber(invoiceToPrint.subtotal)} ৳
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
 
               {/* Summary Totals */}
@@ -1826,6 +2715,25 @@ export const Modals: React.FC = () => {
                     <span>সর্বমোট বিল:</span>
                     <span className="text-indigo-800">{toBengaliNumber(invoiceToPrint.grandTotal)} ৳</span>
                   </div>
+
+                  {/* মোট বিক্রিত মাল / এক্সচেঞ্জ ওজন */}
+                  {isExchangeInvoice ? (
+                    <div className="bg-purple-50 p-2 rounded-lg border border-purple-200 space-y-1 my-1">
+                      <div className="flex justify-between font-bold text-amber-800">
+                        <span>ফেরত মালের মোট ওজন:</span>
+                        <span className="font-extrabold">{toBengaliNumber(returnWeightKg)} কেজি</span>
+                      </div>
+                      <div className="flex justify-between font-bold text-indigo-800">
+                        <span>নতুন মালের মোট ওজন:</span>
+                        <span className="font-extrabold">{toBengaliNumber(newDeliveryWeightKg)} কেজি</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between text-purple-950 font-bold bg-purple-50 px-2.5 py-1.5 rounded-lg border border-purple-200 my-1">
+                      <span className="text-slate-700">মোট বিক্রিত মাল (ওজন):</span>
+                      <span className="font-extrabold text-xs sm:text-sm text-purple-800">{toBengaliNumber(totalInvoiceKg)} কেজি</span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-emerald-700 font-semibold">
                     <span>নগদ জমা:</span>
                     <span>{toBengaliNumber(invoiceToPrint.cashPaid)} ৳</span>
@@ -1836,11 +2744,30 @@ export const Modals: React.FC = () => {
                       <span>{toBengaliNumber(invoiceToPrint.onlinePaid)} ৳</span>
                     </div>
                   )}
-                  <div className={`flex justify-between font-extrabold pt-1 ${
-                    invoiceToPrint.dueAmount > 0 ? 'text-rose-600' : 'text-emerald-700'
+                  {/* আজকের বিলের বাকি */}
+                  <div className="flex justify-between pt-1 border-t border-slate-200">
+                    <span className="text-slate-600 font-medium">আজকের বিলের বাকি:</span>
+                    <span className={`font-bold ${invoiceToPrint.dueAmount > 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                      {invoiceToPrint.dueAmount > 0 ? `${toBengaliNumber(invoiceToPrint.dueAmount)} ৳` : 'পরিশোধিত (০ ৳)'}
+                    </span>
+                  </div>
+
+                  {/* কাস্টমারের পূর্বের বাকি / লাস্ট ডিউ */}
+                  <div className="flex justify-between">
+                    <span className="text-slate-600 font-medium">কাস্টমারের পূর্বের বাকি:</span>
+                    <span className={`font-bold ${(invoiceDueBreakdown?.previousDue || 0) > 0 ? 'text-amber-700' : 'text-slate-700'}`}>
+                      {toBengaliNumber(invoiceDueBreakdown?.previousDue || 0)} ৳
+                    </span>
+                  </div>
+
+                  {/* কাস্টমারের সর্বমোট বাকি */}
+                  <div className={`flex justify-between font-black text-xs sm:text-sm pt-1.5 pb-1 border-t-2 ${
+                    (invoiceDueBreakdown?.totalDue || 0) > 0 
+                      ? 'border-rose-400 text-rose-700 bg-rose-50/80 -mx-1 px-1 rounded' 
+                      : 'border-emerald-300 text-emerald-700'
                   }`}>
-                    <span>অবশিষ্ট বাকি:</span>
-                    <span>{invoiceToPrint.dueAmount > 0 ? `${toBengaliNumber(invoiceToPrint.dueAmount)} ৳` : 'পরিশোধিত'}</span>
+                    <span>কাস্টমারের মোট বকেয়া:</span>
+                    <span>{(invoiceDueBreakdown?.totalDue || 0) > 0 ? `${toBengaliNumber(invoiceDueBreakdown!.totalDue)} ৳` : 'পরিশোধিত (০ ৳)'}</span>
                   </div>
                 </div>
               </div>
@@ -1862,6 +2789,9 @@ export const Modals: React.FC = () => {
 
               <div className="text-center text-[10px] text-slate-500 pt-2 border-t border-slate-200">
                 * বিক্রিত মাল শর্তসাপেক্ষে ফেরত নেওয়া হয়। আমাদের সাথে থাকার জন্য ধন্যবাদ।
+              </div>
+              <div className="text-center text-[10px] font-semibold text-slate-500 pt-1 tracking-wide">
+                App Developer: RS ONLINE - 01611814813
               </div>
             </div>
 
@@ -1892,7 +2822,7 @@ export const Modals: React.FC = () => {
             onClick={(e) => {
               if (e.target === e.currentTarget) setDuePaymentToPrint(null);
             }}
-            className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto print:p-0 print:bg-white print:static"
+            className="fixed inset-0 bg-black/70 z-[70] flex items-center justify-center p-2 sm:p-4 overflow-y-auto print:p-0 print:bg-white print:static"
           >
             <div className="bg-white rounded-2xl max-w-xl w-full p-4 sm:p-6 space-y-4 shadow-2xl print:shadow-none print:max-w-none print:w-full print:rounded-none my-auto">
               
@@ -1924,11 +2854,14 @@ export const Modals: React.FC = () => {
               <div id="printable-due-receipt" className="border border-slate-300 rounded-xl p-4 sm:p-6 space-y-4 bg-white text-slate-800 print:border-none print:p-0">
                 {/* Shop Header */}
                 <div className="text-center border-b-2 border-slate-900 pb-3 space-y-1">
-                  <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-wide">ML Electric</h2>
-                  <h3 className="text-base sm:text-lg font-bold text-slate-800">(এম এল ইলেকট্রিক)</h3>
-                  <p className="text-xs sm:text-sm font-semibold text-slate-700">সকল প্রকার ইলেকট্রিক মালামাল সরবরাহকারী ও বিক্রেতা</p>
+                  <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-wide">Bismillah Traders</h2>
+                  <h3 className="text-base sm:text-lg font-bold text-slate-800">(বিসমিল্লাহ ট্রেডার্স)</h3>
+                  <p className="text-xs sm:text-sm font-semibold text-slate-700">পাইকারী ও খুচরা বিক্রেতা</p>
                   <p className="text-[11px] sm:text-xs text-slate-600 font-medium leading-relaxed mt-1">
-                    মোবাইল: 01860313575,01937035340,01568394900 | ঠিকানা: ১৫০৬, দক্ষিন দনিয়া, পাটেরবাগ রোড, কদমতলী, ধাকা-১২৩৬
+                    ঠিকানা: ১৪৭০, নতুন এ. কে. স্কুল রোড, দক্ষিণ দনিয়া, কদমতলী, ঢাকা-১২৩৬
+                  </p>
+                  <p className="text-[11px] sm:text-xs text-slate-700 font-semibold font-mono">
+                    মোবাইল: 01885926704, 01718042483, 01720640137
                   </p>
                 </div>
 
@@ -2027,6 +2960,7 @@ export const Modals: React.FC = () => {
                     আদায়কারী: <span className="font-semibold text-slate-700">{duePaymentToPrint.collectedBy}</span> | আদায়কৃত সময়: <span className="font-semibold text-slate-700">{toBengaliNumber(new Date(duePaymentToPrint.createdAt).toLocaleTimeString('bn-BD', { hour: '2-digit', minute: '2-digit' }))}</span>
                   </p>
                   <p className="text-slate-400">* আমাদের সাথে লেনদেন করার জন্য ধন্যবাদ। এই রশিদটি যত্নসহকারে সংরক্ষণ করুন।</p>
+                  <p className="text-slate-500 font-semibold pt-1">App Developer: RS ONLINE - 01611814813</p>
                 </div>
               </div>
 
@@ -2051,6 +2985,65 @@ export const Modals: React.FC = () => {
           </div>
         );
       })()}
+
+      {/* Global In-App Confirm Dialog (Bypasses iframe native confirm() blocking) */}
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-black/65 backdrop-blur-2xs z-9999 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                confirmDialog.isDestructive !== false 
+                  ? 'bg-rose-100 text-rose-600' 
+                  : 'bg-indigo-100 text-indigo-600'
+              }`}>
+                {confirmDialog.isDestructive !== false ? (
+                  <Trash2 className="w-5 h-5 text-rose-600" />
+                ) : (
+                  <AlertTriangle className="w-5 h-5 text-indigo-600" />
+                )}
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-black text-slate-900 leading-tight">
+                  {confirmDialog.title || 'আপনি কি নিশ্চিত?'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  এই কাজটি সম্পন্ন করার আগে নিশ্চিত করুন।
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-xs text-slate-800 whitespace-pre-line leading-relaxed font-medium">
+              {confirmDialog.message}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                {confirmDialog.cancelLabel || confirmDialog.cancelText || 'বাতিল'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const onConfirmAction = confirmDialog.onConfirm;
+                  setConfirmDialog(null);
+                  onConfirmAction();
+                }}
+                className={`px-5 py-2 rounded-xl text-white text-xs font-bold transition shadow-sm cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+                  confirmDialog.isDestructive !== false 
+                    ? 'bg-rose-600 hover:bg-rose-700' 
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {confirmDialog.isDestructive !== false && <Trash2 className="w-3.5 h-3.5" />}
+                <span>{confirmDialog.confirmLabel || confirmDialog.confirmText || 'হ্যাঁ, মুছুন'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

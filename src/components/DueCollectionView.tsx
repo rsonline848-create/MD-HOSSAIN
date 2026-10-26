@@ -8,7 +8,13 @@ import {
   Printer, 
   HandCoins 
 } from 'lucide-react';
-import { toBengaliNumber, toEnglishNumber, getFormattedCurrentTime } from '../utils/formatters';
+import { 
+  toBengaliNumber, 
+  toEnglishNumber, 
+  getFormattedCurrentTime,
+  normalizeNumericInput,
+  normalizeInputDigits 
+} from '../utils/formatters';
 
 export const DueCollectionView: React.FC = () => {
   const { 
@@ -41,7 +47,7 @@ export const DueCollectionView: React.FC = () => {
   // Financial inputs
   const [cashCollected, setCashCollected] = useState<string>("");
   const [otherCollected, setOtherCollected] = useState<string>("");
-  const [onlineMethod, setOnlineMethod] = useState<'bkash' | 'nagad' | 'rocket' | 'bank' | 'cheque' | 'goods'>('bkash');
+  const [onlineMethod, setOnlineMethod] = useState<'bkash' | 'nagad' | 'rocket' | 'bank' | 'cheque' | 'goods'>('bank');
   const [discountAmount, setDiscountAmount] = useState<string>("");
 
   // Notifications
@@ -152,7 +158,7 @@ export const DueCollectionView: React.FC = () => {
         discount: numDiscount,
         paymentMethod: method,
         onlineMethod: method === 'online' || numOther > 0 ? onlineMethod : undefined,
-        notes: numCash > 0 && numOther > 0 ? 'নগদ ও অন্যান্য মাধ্যমে আদায়' : (numCash > 0 ? 'নগদ আদায়' : (numOther > 0 ? 'অন্যান্য মাধ্যমে আদায়' : 'শুধুমাত্র ডিসকাউন্ট')),
+        notes: numCash > 0 && numOther > 0 ? 'নগদ ও ব্যাংক মাধ্যমে আদায়' : (numCash > 0 ? 'নগদ আদায়' : (numOther > 0 ? 'ব্যাংক মাধ্যমে আদায়' : 'শুধুমাত্র ডিসকাউন্ট')),
         previousDue: currentDue,
         remainingDue: nextDue
       });
@@ -200,7 +206,18 @@ export const DueCollectionView: React.FC = () => {
           </h2>
         </div>
 
-        <form onSubmit={handleSaveDuePayment} className="space-y-5">
+        <form 
+          onSubmit={handleSaveDuePayment} 
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.keyCode === 13) {
+              const target = e.target as HTMLElement;
+              if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') {
+                e.preventDefault();
+              }
+            }
+          }}
+          className="space-y-5"
+        >
           
           {/* Row 1: তারিখ, বিলের তারিখ ও রশিদ / মেমো নম্বর */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
@@ -214,8 +231,9 @@ export const DueCollectionView: React.FC = () => {
                 value={paymentDate}
                 onChange={(e) => setPaymentDate(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.keyCode === 13) {
                     e.preventDefault();
+                    e.stopPropagation();
                     document.getElementById('billDateInput')?.focus();
                   }
                 }}
@@ -234,9 +252,11 @@ export const DueCollectionView: React.FC = () => {
                 value={billDate}
                 onChange={(e) => setBillDate(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.keyCode === 13) {
                     e.preventDefault();
+                    e.stopPropagation();
                     memoNoRef.current?.focus();
+                    memoNoRef.current?.select?.();
                   }
                 }}
                 className="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 shadow-sm"
@@ -252,11 +272,16 @@ export const DueCollectionView: React.FC = () => {
                 type="text"
                 placeholder="মেমো নম্বর"
                 value={memoNo}
-                onChange={(e) => setMemoNo(e.target.value)}
+                onChange={(e) => setMemoNo(normalizeInputDigits(e.target.value))}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
+                  if (e.key === 'Enter' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.keyCode === 13) {
                     e.preventDefault();
-                    customerInputRef.current?.focus();
+                    e.stopPropagation();
+                    // Move to next tab / next input (Customer selection field)
+                    if (customerInputRef.current) {
+                      customerInputRef.current.focus();
+                      customerInputRef.current.select?.();
+                    }
                   }
                 }}
                 className="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm font-semibold text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 shadow-sm font-mono"
@@ -283,7 +308,8 @@ export const DueCollectionView: React.FC = () => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
                       setShowCustomerDropdown(false);
-                      cashCollectedRef.current?.focus();
+                      discountAmountRef.current?.focus();
+                      discountAmountRef.current?.select?.();
                     }
                   }}
                   className="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 shadow-sm"
@@ -347,18 +373,19 @@ export const DueCollectionView: React.FC = () => {
               </label>
               <input
                 ref={discountAmountRef}
-                type="text" inputMode="numeric"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 placeholder="0"
                 value={discountAmount || ''}
-                onChange={(e) => setDiscountAmount(e.target.value)}
+                onChange={(e) => setDiscountAmount(normalizeNumericInput(e.target.value))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     cashCollectedRef.current?.focus();
+                    cashCollectedRef.current?.select?.();
                   }
                 }}
-                className="w-full bg-white border border-pink-500 rounded-lg px-3.5 py-2 text-sm font-semibold text-pink-600 placeholder:text-pink-300 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 shadow-sm"
+                className="w-full bg-white border border-pink-500 rounded-lg px-3.5 py-2 text-sm font-semibold text-pink-600 placeholder:text-pink-300 focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-pink-500 shadow-sm font-mono"
               />
             </div>
             <div>{/* Empty column matching layout */}</div>
@@ -372,56 +399,52 @@ export const DueCollectionView: React.FC = () => {
               </label>
               <input
                 ref={cashCollectedRef}
-                type="text" inputMode="numeric"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 placeholder="0"
                 value={cashCollected || ''}
-                onChange={(e) => setCashCollected(e.target.value)}
+                onChange={(e) => setCashCollected(normalizeNumericInput(e.target.value))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     otherCollectedRef.current?.focus();
+                    otherCollectedRef.current?.select?.();
                   }
                 }}
-                className="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm font-bold text-[#15803d] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
+                className="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm font-bold text-[#15803d] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm font-mono"
               />
             </div>
 
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1.5">
-                পেমেন্ট মাধ্যম
+                অনলাইন পেমেন্ট মাধ্যম
               </label>
               <select
                 value={onlineMethod}
                 onChange={(e: any) => setOnlineMethod(e.target.value)}
                 className="w-full bg-white border border-slate-300 rounded-lg px-3.5 py-2 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
               >
-                <option value="bkash">বিকাশ (bKash)</option>
-                <option value="nagad">নগদ (Nagad)</option>
-                <option value="rocket">রকেট (Rocket)</option>
                 <option value="bank">ব্যাংক (Bank)</option>
-                <option value="cheque">চেক (Cheque)</option>
-                <option value="goods">মাল বাবদ পেমেন্ট (Goods)</option>
               </select>
             </div>
             <div>
               <label className="text-xs font-bold text-[#4338ca] block mb-1.5">
-                পেমেন্টের টাকা
+                অনলাইন পেমেন্টের টাকা (ব্যাংক)
               </label>
               <input
                 ref={otherCollectedRef}
-                type="text" inputMode="numeric"
-                min="0"
+                type="text"
+                inputMode="decimal"
                 placeholder="0"
                 value={otherCollected || ''}
-                onChange={(e) => setOtherCollected(e.target.value)}
+                onChange={(e) => setOtherCollected(normalizeNumericInput(e.target.value))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     submitButtonRef.current?.focus();
                   }
                 }}
-                className="w-full bg-white border border-indigo-300 rounded-lg px-3.5 py-2 text-sm font-bold text-[#4338ca] placeholder:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                className="w-full bg-white border border-indigo-300 rounded-lg px-3.5 py-2 text-sm font-bold text-[#4338ca] placeholder:text-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm font-mono"
               />
             </div>
           </div>

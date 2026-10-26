@@ -3,17 +3,17 @@ import { db } from './firebase';
 import { AppLicense } from '../types';
 
 export const DEFAULT_LICENSE: AppLicense = {
-  licenseKey: 'RS-MLE-2026-9931',
-  shopName: 'এম এল ইলেকট্রিক',
+  licenseKey: 'LIFETIME-UNLOCKED',
+  shopName: 'বিসমিল্লাহ ট্রেডার্স (Bismillah Traders)',
   clientPhone: '01611814813',
   providerName: 'RS ONLINE',
   supportPhone: '01611814813',
   status: 'active',
-  planName: '১ বছর মেয়াদী (Annual Plan)',
+  planName: 'আজীবন আনলিমিটেড (Lifetime)',
   activatedAt: new Date().toISOString(),
-  expiresAt: '2026-09-15T23:59:59.000Z',
-  maxBranches: 10,
-  notes: 'অফিসিয়াল ক্লাউড লাইসেন্স - আর এস অনলাইন'
+  expiresAt: '2099-12-31T23:59:59.000Z',
+  maxBranches: 999,
+  notes: 'লাইসেন্স সিস্টেম স্থায়ীভাবে বন্ধ ও সফটওয়্যার সম্পূর্ণ আনলক করা হয়েছে'
 };
 
 const LOCAL_STORAGE_KEY = 'ML_ELECTRIC_CLOUD_LICENSE';
@@ -45,24 +45,14 @@ export const saveCachedLicense = (license: AppLicense) => {
   }
 };
 
-// Helper: Calculate license status & remaining duration
-export const getLicenseStatusDetails = (license: AppLicense) => {
-  const now = new Date().getTime();
-  const expireTime = new Date(license.expiresAt).getTime();
-  const diffMs = expireTime - now;
-  const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  const isSuspended = license.status === 'suspended';
-  const isExplicitlyExpired = license.status === 'expired';
-  const isTimeExpired = diffMs <= 0;
-  const isExpired = isSuspended || isExplicitlyExpired || isTimeExpired;
-  const isValid = !isExpired;
-
+// Helper: License system permanently disabled (always valid, never expired)
+export const getLicenseStatusDetails = (_license?: AppLicense) => {
   return {
-    isValid,
-    isExpired,
-    isSuspended,
-    daysLeft: isExpired && daysLeft < 0 ? 0 : daysLeft,
-    diffMs
+    isValid: true,
+    isExpired: false,
+    isSuspended: false,
+    daysLeft: 99999,
+    diffMs: 999999999999
   };
 };
 

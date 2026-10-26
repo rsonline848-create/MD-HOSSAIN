@@ -1,6 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
-import { Printer, Download, Eye, Trash2, Edit, X, CheckCircle } from 'lucide-react';
+import { 
+  Printer, 
+  Download, 
+  Eye, 
+  Trash2, 
+  Edit, 
+  X, 
+  CheckCircle,
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Scale,
+  Receipt,
+  Package,
+  Calendar,
+  Sparkles,
+  ChevronDown,
+  ChevronUp
+} from 'lucide-react';
 import { toBengaliNumber, toEnglishNumber, normalizeDate, isSameDate, formatDate, isDateInRange } from '../utils/formatters';
 import { Invoice, DuePaymentRecord } from '../types';
 
@@ -13,11 +31,24 @@ export const DateSalesView: React.FC = () => {
     setInvoiceToPrint,
     setDuePaymentToPrint,
     moveToRecycleBin,
+    deleteInvoice,
     setInvoices,
     setDuePayments,
+    canEditOrDelete,
+    isManager,
+    currentUser,
     customers,
-    setCustomers
+    setCustomers,
+    expenses,
+    products,
+    language,
+    t,
+    setCurrentTab,
+    setInvoiceToEdit,
+    confirmAction
   } = useApp();
+
+  const isUserManager = Boolean(isManager || currentUser?.role === 'manager');
 
   const [startDateInput, setStartDateInput] = useState<string>(normalizeDate(selectedDate) || new Date().toISOString().split('T')[0]);
   const [endDateInput, setEndDateInput] = useState<string>(normalizeDate(selectedDate) || new Date().toISOString().split('T')[0]);
@@ -42,9 +73,13 @@ export const DateSalesView: React.FC = () => {
   // Edit Due Collection States
   const [editingDuePayment, setEditingDuePayment] = useState<DuePaymentRecord | null>(null);
   const [editDueAmount, setEditDueAmount] = useState<string>("");
-  const [editDueOnlineMethod, setEditDueOnlineMethod] = useState<'bkash' | 'nagad' | 'rocket' | 'bank' | 'cheque' | 'goods'>('bkash');
+  const [editDueOnlineMethod, setEditDueOnlineMethod] = useState<'bkash' | 'nagad' | 'rocket' | 'bank' | 'cheque' | 'goods'>('bank');
 
   const handleOpenEditInvoice = (inv: Invoice) => {
+    if (!canEditOrDelete) {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো ইনভয়েস এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
     setEditingInvoice(inv);
     const customer = customers.find(c => c.id === inv.customerId);
     setEditCustomerName(inv.customerName || customer?.name || '');
@@ -60,6 +95,10 @@ export const DateSalesView: React.FC = () => {
   };
 
   const handleOpenEditDuePayment = (dp: DuePaymentRecord) => {
+    if (!canEditOrDelete) {
+      alert('ম্যানেজার একাউন্ট থেকে বাকি আদায় এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
     setEditingDuePayment(dp);
     const customer = customers.find(c => c.id === dp.customerId);
     setEditCustomerName(dp.customerName || customer?.name || '');
@@ -69,7 +108,7 @@ export const DateSalesView: React.FC = () => {
     setEditCashPaid(String(dp.cashPaid ?? (dp.paymentMethod === 'cash' ? dp.amount : "")));
     setEditOnlinePaid(String(dp.onlinePaid ?? (dp.paymentMethod !== 'cash' ? dp.amount : "")));
     setEditDiscount(String(dp.discount || ""));
-    setEditDueOnlineMethod(dp.onlineMethod || 'bkash');
+    setEditDueOnlineMethod(dp.onlineMethod || 'bank');
     setEditDate(dp.date || '');
     setEditInvoiceNo(dp.receiptNo || '');
   };
@@ -218,6 +257,7 @@ export const DateSalesView: React.FC = () => {
     type: 'sale' | 'due_collection';
     memo: string;
     customer: string;
+    totalKg: number;
     sale: number;
     discount: number;
     cash: number;
@@ -227,23 +267,30 @@ export const DateSalesView: React.FC = () => {
   }
 
   const tableRows: CombinedRow[] = [
-    ...filteredInvoices.map(inv => ({
-      id: inv.id,
-      type: 'sale' as const,
-      memo: inv.invoiceNo,
-      customer: inv.customerName,
-      sale: (inv.subtotal || inv.grandTotal || 0),
-      discount: inv.discount || 0,
-      cash: inv.cashPaid || 0,
-      other: inv.onlinePaid || 0,
-      due: inv.dueAmount || 0,
-      originalData: inv
-    })),
+    ...filteredInvoices.map(inv => {
+      const invKg = Array.isArray(inv.items)
+        ? inv.items.reduce((sum: number, it: any) => sum + (Number(it.quantity) || 0), 0)
+        : 0;
+      return {
+        id: inv.id,
+        type: 'sale' as const,
+        memo: inv.invoiceNo,
+        customer: inv.customerName,
+        totalKg: invKg,
+        sale: (inv.subtotal || inv.grandTotal || 0),
+        discount: inv.discount || 0,
+        cash: inv.cashPaid || 0,
+        other: inv.onlinePaid || 0,
+        due: inv.dueAmount || 0,
+        originalData: inv
+      };
+    }),
     ...filteredDuePayments.map(dp => ({
       id: dp.id,
       type: 'due_collection' as const,
       memo: dp.receiptNo || 'রশিদ',
       customer: dp.customerName + ' (বাকি আদায়)',
+      totalKg: 0,
       sale: 0,
       discount: 0,
       cash: dp.cashPaid ?? (dp.paymentMethod === 'cash' ? dp.amount : 0),
@@ -258,52 +305,456 @@ export const DateSalesView: React.FC = () => {
   });
 
   // Calculations for total summary
+  const totalWeightInTable = tableRows.reduce((sum, r) => sum + r.totalKg, 0);
   const totalSale = tableRows.reduce((sum, r) => sum + r.sale, 0);
   const totalDiscount = tableRows.reduce((sum, r) => sum + r.discount, 0);
   const totalCash = tableRows.reduce((sum, r) => sum + r.cash, 0);
   const totalOther = tableRows.reduce((sum, r) => sum + r.other, 0);
   const totalDue = tableRows.reduce((sum, r) => sum + r.due, 0);
 
-  const handleDeleteItem = (row: CombinedRow) => {
-    if (row.type === 'sale') {
-      if (window.confirm(`আপনি কি নিশ্চিত মেমো #${row.memo} রিসাইকেল বিনে পাঠাতে চান?`)) {
-        // Find the customer to revert their purchase and due balance
-        const customer = customers.find(c => c.id === row.originalData.customerId);
-        if (customer) {
-          const revertPurchased = row.originalData.grandTotal;
-          const revertPaid = row.originalData.cashPaid + row.originalData.onlinePaid;
-          const revertDue = revertPurchased - revertPaid;
-          const updatedCustomer = {
-            ...customer,
-            totalPurchased: (customer.totalPurchased || 0) - revertPurchased,
-            totalPaid: (customer.totalPaid || 0) - revertPaid,
-            currentDue: (customer.currentDue || 0) - revertDue,
-            updatedAt: new Date().toISOString(),
-          };
-          setCustomers(prev => prev.map(c => c.id === customer.id ? updatedCustomer : c));
-        }
-        
-        moveToRecycleBin('invoice', `ইনভয়েস #${row.memo} (${row.customer})`, row.originalData, row.originalData.grandTotal);
-        setInvoices(prev => prev.filter(i => i.id !== row.id));
-      }
-    } else if (row.type === 'due_collection') {
-      if (window.confirm(`আপনি কি নিশ্চিত এই আদায়টি মুছতে চান?`)) {
-        // Find the customer to revert their paid amount and due balance
-        const customer = customers.find(c => c.id === row.originalData.customerId);
-        if (customer) {
-          const updatedCustomer = {
-            ...customer,
-            totalPaid: (customer.totalPaid || 0) - (row.originalData.amount || 0),
-            currentDue: (customer.currentDue || 0) + (row.originalData.amount || 0),
-            updatedAt: new Date().toISOString(),
-          };
-          setCustomers(prev => prev.map(c => c.id === customer.id ? updatedCustomer : c));
-        }
-        
-        moveToRecycleBin('due_payment', `বাকি আদায় (${row.customer})`, row.originalData, row.originalData.amount);
-        setDuePayments(prev => prev.filter(p => p.id !== row.id));
-      }
+  // Profit & Loss State (Hidden by default, click button to reveal; completely hidden for manager role)
+  const [showProfitLoss, setShowProfitLoss] = useState<boolean>(false);
+
+  // Quick Preset Handlers
+  const handleSetQuickPreset = (type: 'today' | 'yesterday' | '7days' | 'this_month') => {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    if (type === 'today') {
+      setStartDateInput(todayStr);
+      setEndDateInput(todayStr);
+      setActiveQueryStartDate(todayStr);
+      setActiveQueryEndDate(todayStr);
+      setSelectedDate(todayStr);
+    } else if (type === 'yesterday') {
+      const y = new Date();
+      y.setDate(today.getDate() - 1);
+      const yStr = y.toISOString().split('T')[0];
+      setStartDateInput(yStr);
+      setEndDateInput(yStr);
+      setActiveQueryStartDate(yStr);
+      setActiveQueryEndDate(yStr);
+      setSelectedDate(yStr);
+    } else if (type === '7days') {
+      const past = new Date();
+      past.setDate(today.getDate() - 6);
+      const pastStr = past.toISOString().split('T')[0];
+      setStartDateInput(pastStr);
+      setEndDateInput(todayStr);
+      setActiveQueryStartDate(pastStr);
+      setActiveQueryEndDate(todayStr);
+    } else if (type === 'this_month') {
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+      setStartDateInput(firstDay);
+      setEndDateInput(todayStr);
+      setActiveQueryStartDate(firstDay);
+      setActiveQueryEndDate(todayStr);
     }
+  };
+
+  // Calculations for Profit & Loss (লাভ-ক্ষতি ও মুনাফা বিশ্লেষণ)
+  const { 
+    totalSoldWeight, 
+    totalCostOfGoods, 
+    grossProfit, 
+    totalPeriodExpenses, 
+    netProfit, 
+    totalSalesRevenue,
+    profitMarginPercent 
+  } = useMemo(() => {
+    let soldWeight = 0;
+    let costOfGoods = 0;
+
+    filteredInvoices.forEach(inv => {
+      if (inv.items && Array.isArray(inv.items)) {
+        inv.items.forEach(item => {
+          const qty = Number(item.quantity) || 0;
+          soldWeight += qty;
+
+          let costRate = Number(item.costPrice) || 0;
+          if (costRate <= 0) {
+            const matchedProd = products.find(p => 
+              p.name.trim().toLowerCase() === item.name.trim().toLowerCase() ||
+              (item.name && item.name.toLowerCase().includes(p.name.toLowerCase()))
+            );
+            costRate = matchedProd?.purchasePrice ? Number(matchedProd.purchasePrice) : 0;
+          }
+          costOfGoods += (qty * costRate);
+        });
+      }
+    });
+
+    const totalRev = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.grandTotal) || 0), 0);
+    const gross = totalRev - costOfGoods;
+
+    const rangeExpenses = expenses
+      .filter(exp => isDateInRange(exp.date, activeQueryStartDate, activeQueryEndDate))
+      .reduce((sum, exp) => sum + (Number(exp.amount) || 0), 0);
+
+    const net = gross - rangeExpenses;
+    const margin = totalRev > 0 ? Math.round((net / totalRev) * 100) : 0;
+
+    return {
+      totalSoldWeight: soldWeight,
+      totalCostOfGoods: costOfGoods,
+      grossProfit: gross,
+      totalPeriodExpenses: rangeExpenses,
+      netProfit: net,
+      totalSalesRevenue: totalRev,
+      profitMarginPercent: margin
+    };
+  }, [filteredInvoices, expenses, products, activeQueryStartDate, activeQueryEndDate]);
+
+  const handleDeleteItem = (row: CombinedRow) => {
+    if (!canEditOrDelete) {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো রেকর্ড ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
+    if (row.type === 'sale') {
+      confirmAction({
+        title: 'মেমো মুছে ফেলা',
+        message: `আপনি কি নিশ্চিত মেমো #${row.memo} রিসাইকেল বিনে পাঠাতে চান? এতে বিক্রি বাতিল হবে এবং বিক্রিত সকল পণ্যের স্টক স্বয়ংক্রিয়ভাবে আবার স্টকে ফেরত যোগ হবে।`,
+        confirmLabel: 'হ্যাঁ, মেমো মুছুন',
+        onConfirm: () => deleteInvoice(row.id)
+      });
+    } else if (row.type === 'due_collection') {
+      confirmAction({
+        title: 'আদায় রেকর্ড মুছে ফেলা',
+        message: `আপনি কি নিশ্চিত এই আদায়টি (${toBengaliNumber(row.originalData?.amount || (row.cash + row.other))} ৳) মুছতে চান? কাস্টমারের বকেয়া আবার সমন্বয় হয়ে যাবে।`,
+        confirmLabel: 'হ্যাঁ, মুছুন',
+        onConfirm: () => {
+          const customer = customers.find(c => c.id === row.originalData.customerId);
+          if (customer) {
+            const updatedCustomer = {
+              ...customer,
+              totalPaid: (customer.totalPaid || 0) - (row.originalData.amount || 0),
+              currentDue: (customer.currentDue || 0) + (row.originalData.amount || 0),
+              updatedAt: new Date().toISOString(),
+            };
+            setCustomers(prev => prev.map(c => c.id === customer.id ? updatedCustomer : c));
+          }
+          
+          moveToRecycleBin('due_payment', `বাকি আদায় (${row.customer})`, row.originalData, row.originalData.amount);
+          setDuePayments(prev => prev.filter(p => p.id !== row.id));
+        }
+      });
+    }
+  };
+
+  // Print Profit & Loss Statement ONLY (শুধুমাত্র লাভ-ক্ষতি বিবরণী প্রিন্ট)
+  const handlePrintProfitLoss = () => {
+    if (isUserManager) {
+      alert('ম্যানেজার একাউন্ট থেকে লাভ-ক্ষতি বিবরণী দেখার বা প্রিন্ট করার অনুমতি নেই।');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank', 'width=850,height=750');
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+
+    const isSingleDay = activeQueryStartDate === activeQueryEndDate;
+    const periodText = isSingleDay
+      ? `${formatDate(activeQueryStartDate)}`
+      : `${formatDate(activeQueryStartDate)} হতে ${formatDate(activeQueryEndDate)}`;
+    const printDate = formatDate(new Date());
+
+    const isProfit = netProfit >= 0;
+    const netStatusText = isProfit ? 'নিট লাভ (Net Profit)' : 'নিট লোকসান (Net Loss)';
+    const netFormatted = isProfit 
+      ? `+${toBengaliNumber(netProfit)} ৳` 
+      : `-${toBengaliNumber(Math.abs(netProfit))} ৳`;
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="bn">
+      <head>
+        <meta charset="UTF-8">
+        <title>লাভ-ক্ষতি ও মুনাফা বিবরণী</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+        <style>
+          @page { size: A4 portrait; margin: 12mm 15mm; }
+          body { 
+            font-family: 'Noto Sans Bengali', 'SolaimanLipi', 'Kalpurush', sans-serif; 
+            margin: 0; 
+            padding: 15px; 
+            color: #0f172a; 
+            background: #fff; 
+            font-size: 12px; 
+          }
+          .header { text-align: center; border-bottom: 2px solid #4338ca; padding-bottom: 8px; margin-bottom: 12px; }
+          .shop-name { font-size: 22px; font-weight: 900; color: #3730a3; margin: 0; }
+          .shop-sub { font-size: 11px; color: #475569; margin: 3px 0 0 0; }
+          .doc-title { 
+            font-size: 15px; 
+            font-weight: 800; 
+            color: #1e1b4b; 
+            margin-top: 6px; 
+            letter-spacing: 0.5px;
+            background: #eef2ff;
+            display: inline-block;
+            padding: 4px 16px;
+            border-radius: 6px;
+            border: 1px solid #c7d2fe;
+          }
+          .meta-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 7px 12px;
+            margin-bottom: 12px;
+            font-size: 11.5px;
+          }
+          .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 14px;
+          }
+          .stat-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 8px 10px;
+            background: #fafafa;
+            text-align: center;
+          }
+          .stat-label {
+            font-size: 10.5px;
+            color: #64748b;
+            font-weight: 700;
+            margin-bottom: 3px;
+          }
+          .stat-value {
+            font-size: 15px;
+            font-weight: 900;
+            color: #1e293b;
+          }
+          .stat-card.net-box {
+            grid-column: span 3;
+            background: ${isProfit ? '#ecfdf5' : '#fff1f2'};
+            border: 2px solid ${isProfit ? '#10b981' : '#f43f5e'};
+            padding: 10px;
+          }
+          .stat-card.net-box .stat-label {
+            color: ${isProfit ? '#047857' : '#be123c'};
+            font-size: 11.5px;
+          }
+          .stat-card.net-box .stat-value {
+            font-size: 20px;
+            color: ${isProfit ? '#065f46' : '#9f1239'};
+          }
+          table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 11.5px; }
+          th { 
+            background-color: #e0e7ff; 
+            color: #312e81; 
+            font-weight: 800; 
+            border: 1px solid #c7d2fe; 
+            padding: 7px 9px; 
+            text-align: left; 
+          }
+          td { border: 1px solid #e2e8f0; padding: 6px 9px; }
+          .text-right { text-align: right; }
+          .text-center { text-align: center; }
+          .highlight-row { background-color: #f1f5f9; font-weight: 700; }
+          .final-row { 
+            background-color: ${isProfit ? '#f0fdf4' : '#fff1f2'}; 
+            font-weight: 900; 
+            font-size: 12.5px;
+            border-top: 2px solid ${isProfit ? '#16a34a' : '#e11d48'};
+            border-bottom: 2px solid ${isProfit ? '#16a34a' : '#e11d48'};
+          }
+          .formula-box {
+            margin-top: 12px;
+            padding: 7px 10px;
+            background: #f8fafc;
+            border-left: 4px solid #6366f1;
+            font-size: 10.5px;
+            color: #334155;
+            border-radius: 4px;
+          }
+          .footer { 
+            margin-top: 40px; 
+            display: flex; 
+            justify-content: space-between; 
+            padding-top: 15px; 
+          }
+          .sig-line { 
+            border-top: 1px dashed #94a3b8; 
+            width: 170px; 
+            text-align: center; 
+            font-size: 10.5px; 
+            color: #475569; 
+            padding-top: 4px; 
+          }
+          .no-print {
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+          }
+          .btn-print {
+            background: #4338ca;
+            color: #fff;
+            border: none;
+            padding: 7px 14px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 12px;
+            cursor: pointer;
+          }
+          .btn-close {
+            background: #64748b;
+            color: #fff;
+            border: none;
+            padding: 7px 14px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 12px;
+            cursor: pointer;
+          }
+          @media print {
+            body { padding: 0; }
+            .no-print { display: none !important; }
+            th { background-color: #e0e7ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .stat-card.net-box { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .final-row { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="no-print">
+          <button class="btn-print" onclick="window.print()">🖨️ প্রিন্ট করুন (Print)</button>
+          <button class="btn-close" onclick="window.close()">✕ বন্ধ করুন</button>
+        </div>
+
+        <div class="header">
+          <h1 class="shop-name">বিসমিল্লাহ ট্রেডার্স (Bismillah Traders)</h1>
+          <p class="shop-sub">ঠিকানা: ১৪৭০, নতুন এ. কে. স্কুল রোড, দক্ষিণ দনিয়া, কদমতলী, ঢাকা-১২৩৬ | মোবাইল: 01885926704, 01718042483, 01720640137</p>
+          <div class="doc-title">লাভ-ক্ষতি ও মুনাফা বিবরণী (Profit & Loss Statement)</div>
+        </div>
+
+        <div class="meta-bar">
+          <div><strong>সময়সীমা / তারিখ:</strong> ${periodText}</div>
+          <div><strong>প্রিন্টের তারিখ:</strong> ${printDate}</div>
+        </div>
+
+        <div class="summary-grid">
+          <div class="stat-card">
+            <div class="stat-label">মোট বিক্রিত মাল (ওজন)</div>
+            <div class="stat-value" style="color: #7c3aed;">${toBengaliNumber(totalSoldWeight)} কেজি</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">মোট বিক্রয়মূল্য (Sales)</div>
+            <div class="stat-value" style="color: #1e293b;">${toBengaliNumber(totalSalesRevenue)} ৳</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">মালের ক্রয়মূল্য (COGS)</div>
+            <div class="stat-value" style="color: #d97706;">${toBengaliNumber(totalCostOfGoods)} ৳</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">গ্রস মুনাফা (বিক্রি - ক্রয়)</div>
+            <div class="stat-value" style="color: #0d9488;">${grossProfit >= 0 ? '+' : ''}${toBengaliNumber(grossProfit)} ৳</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">দোকানের পরিচালনা খরচ</div>
+            <div class="stat-value" style="color: #e11d48;">${toBengaliNumber(totalPeriodExpenses)} ৳</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">মুনাফার হার (Margin)</div>
+            <div class="stat-value" style="color: #4338ca;">${toBengaliNumber(profitMarginPercent)}%</div>
+          </div>
+
+          <div class="stat-card net-box">
+            <div class="stat-label">সর্বমোট নিট ফলাফল (${netStatusText})</div>
+            <div class="stat-value">${netFormatted}</div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 8%;" class="text-center">নং</th>
+              <th style="width: 46%;">বিবরণ (Particulars)</th>
+              <th style="width: 26%;" class="text-center">পরিমাণ / মন্তব্য</th>
+              <th style="width: 20%;" class="text-right">টাকা (৳)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="text-center">১</td>
+              <td><strong>মোট বিক্রয় আয় (Total Sales Revenue)</strong></td>
+              <td class="text-center">${toBengaliNumber(totalSoldWeight)} কেজি বিক্রিত মাল</td>
+              <td class="text-right"><strong>${toBengaliNumber(totalSalesRevenue)} ৳</strong></td>
+            </tr>
+            <tr>
+              <td class="text-center">২</td>
+              <td>বাদ: বিক্রিত মালের আসল ক্রয়মূল্য (Cost of Goods Sold - COGS)</td>
+              <td class="text-center">আসল কেনা দর বাবদ</td>
+              <td class="text-right" style="color: #d97706;">(-) ${toBengaliNumber(totalCostOfGoods)} ৳</td>
+            </tr>
+            <tr class="highlight-row">
+              <td class="text-center">=</td>
+              <td><strong>মোট গ্রস মুনাফা / লাভ (Gross Profit)</strong></td>
+              <td class="text-center">বিক্রয়মূল্য - ক্রয়মূল্য</td>
+              <td class="text-right" style="color: #0d9488;"><strong>${grossProfit >= 0 ? '+' : ''}${toBengaliNumber(grossProfit)} ৳</strong></td>
+            </tr>
+            <tr>
+              <td class="text-center">৩</td>
+              <td>বাদ: দোকানের মোট পরিচালনা ও দৈনিক খরচ (Shop Expenses)</td>
+              <td class="text-center">দৈনিক ও অন্যান্য খরচ</td>
+              <td class="text-right" style="color: #e11d48;">(-) ${toBengaliNumber(totalPeriodExpenses)} ৳</td>
+            </tr>
+            <tr class="final-row">
+              <td class="text-center">★</td>
+              <td><strong>সর্বমোট নিট লাভ / লোকসান (Net Profit / Loss)</strong></td>
+              <td class="text-center">গ্রস লাভ - দোকান খরচ</td>
+              <td class="text-right" style="color: ${isProfit ? '#15803d' : '#b91c1c'}; font-size: 13px;">
+                <strong>${netFormatted}</strong>
+              </td>
+            </tr>
+            <tr>
+              <td class="text-center">%</td>
+              <td>নিট মুনাফার হার (Net Profit Margin)</td>
+              <td class="text-center">নিট লাভ ÷ মোট বিক্রয় × ১০০</td>
+              <td class="text-right"><strong>${toBengaliNumber(profitMarginPercent)}%</strong></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="formula-box">
+          <strong>💡 হিসাব পদ্ধতি:</strong> নিট লাভ = (মোট বিক্রয়মূল্য - বিক্রিত মালের ক্রয়মূল্য) - দোকানের মোট খরচ
+        </div>
+
+        <div class="footer">
+          <div class="sig-line">হিসাবরক্ষক / প্রস্তুতকারী</div>
+          <div class="sig-line">ম্যানেজার / ক্যাশিয়ার</div>
+          <div class="sig-line">স্বত্বাধিকারী / কর্তৃপক্ষ</div>
+        </div>
+
+        <div style="text-align: center; font-size: 10px; color: #64748b; font-weight: 600; margin-top: 20px; padding-top: 6px; border-top: 1px dashed #cbd5e1;">
+          App Developer: RS ONLINE - 01611814813
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
   };
 
   // Print summary or table
@@ -359,7 +810,7 @@ export const DateSalesView: React.FC = () => {
           <form onSubmit={handleQueryDate} className="flex flex-wrap sm:flex-nowrap items-center gap-3">
             <div className="flex items-center gap-2">
               <label className="text-sm font-bold text-slate-700 whitespace-nowrap">
-                শুরু:
+                {language === 'bn' ? 'শুরু:' : 'Start:'}
               </label>
               <input
                 type="date"
@@ -371,7 +822,7 @@ export const DateSalesView: React.FC = () => {
             
             <div className="flex items-center gap-2">
               <label className="text-sm font-bold text-slate-700 whitespace-nowrap">
-                শেষ:
+                {language === 'bn' ? 'শেষ:' : 'End:'}
               </label>
               <input
                 type="date"
@@ -385,46 +836,264 @@ export const DateSalesView: React.FC = () => {
               type="submit"
               className="bg-[#4338ca] hover:bg-[#3730a3] text-white px-4 py-1.5 rounded-lg text-xs sm:text-sm font-bold shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
             >
-              খুঁজুন
+              {language === 'bn' ? 'খুঁজুন' : 'Search'}
             </button>
           </form>
 
           {/* Right: Inline stats banner */}
           <div className="bg-[#f8fafc] border border-slate-200 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold flex flex-wrap items-center gap-2 sm:gap-4 text-slate-700">
             <span>
-              মোট বিক্রি: <strong className="text-indigo-700">{toBengaliNumber(totalSale)} ৳</strong>
+              {language === 'bn' ? 'মোট বিক্রি: ' : 'Total Sales: '}<strong className="text-indigo-700">{toBengaliNumber(totalSale)} ৳</strong>
             </span>
             <span className="text-slate-300">|</span>
             <span>
-              নগদ: <strong className="text-emerald-600">{toBengaliNumber(totalCash)} ৳</strong>
+              {language === 'bn' ? 'নগদ: ' : 'Cash: '}<strong className="text-emerald-600">{toBengaliNumber(totalCash)} ৳</strong>
             </span>
             <span className="text-slate-300">|</span>
             <span>
-              বাকি: <strong className="text-amber-600">{toBengaliNumber(totalDue)} ৳</strong>
+              {language === 'bn' ? 'বাকি: ' : 'Due: '}<strong className="text-amber-600">{toBengaliNumber(totalDue)} ৳</strong>
             </span>
           </div>
         </div>
+
+        {/* Quick Date Presets Bar & Profit-Loss Toggle */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
+            <span className="text-slate-500 mr-1 flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+              <span>{language === 'bn' ? 'সহজ ফিল্টার:' : 'Quick Filters:'}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => handleSetQuickPreset('today')}
+              className={`px-3 py-1 rounded-lg border transition cursor-pointer ${
+                startDateInput === new Date().toISOString().split('T')[0] && endDateInput === new Date().toISOString().split('T')[0]
+                  ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-indigo-50'
+              }`}
+            >
+              {language === 'bn' ? 'আজকে' : 'Today'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetQuickPreset('yesterday')}
+              className="px-3 py-1 rounded-lg border border-slate-300 bg-white hover:bg-indigo-50 text-slate-700 transition cursor-pointer"
+            >
+              {language === 'bn' ? 'গতকাল' : 'Yesterday'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetQuickPreset('7days')}
+              className="px-3 py-1 rounded-lg border border-slate-300 bg-white hover:bg-indigo-50 text-slate-700 transition cursor-pointer"
+            >
+              {language === 'bn' ? 'গত ৭ দিন' : 'Last 7 Days'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetQuickPreset('this_month')}
+              className="px-3 py-1 rounded-lg border border-slate-300 bg-white hover:bg-indigo-50 text-slate-700 transition cursor-pointer"
+            >
+              {language === 'bn' ? 'চলতি মাস' : 'This Month'}
+            </button>
+          </div>
+
+          {/* Toggle Profit Loss Section (Hidden for Managers) */}
+          {!isUserManager && (
+            <button
+              type="button"
+              onClick={() => setShowProfitLoss(prev => !prev)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-700 text-white rounded-lg text-xs font-bold shadow-2xs hover:shadow transition cursor-pointer"
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span>
+                {showProfitLoss 
+                  ? (language === 'bn' ? 'লাভ-ক্ষতি সামারি লুকান' : 'Hide P&L Summary') 
+                  : (language === 'bn' ? `📊 লাভ-ক্ষতি ও মুনাফা সামারি দেখুন (${toBengaliNumber(totalSoldWeight)} কেজি বিক্রি)` : `📊 View Profit & Loss Summary (${toBengaliNumber(totalSoldWeight)} KG)`)}
+              </span>
+              {showProfitLoss ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          )}
+        </div>
+
+        {/* ======================================================== */}
+        {/* PROFIT & LOSS SUMMARY CARD (তারিখ অনুযায়ী লাভ-ক্ষতি) */}
+        {/* ======================================================== */}
+        {!isUserManager && showProfitLoss && (
+          <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-4 sm:p-6 shadow-md border border-indigo-900/60 space-y-4 animate-in fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-3">
+              <div>
+                <span className="text-[11px] font-bold tracking-wider uppercase text-indigo-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>
+                    {language === 'bn' ? 'লাভ-ক্ষতি ও মুনাফা বিবরণী (Profit & Loss Statement)' : 'Profit & Loss Statement'}
+                  </span>
+                </span>
+                <h3 className="text-base sm:text-lg font-black text-white mt-0.5">
+                  {language === 'bn' ? (
+                    activeQueryStartDate === activeQueryEndDate
+                      ? `তারিখ: ${formatDate(activeQueryStartDate)}`
+                      : `তারিখ: ${formatDate(activeQueryStartDate)} থেকে ${formatDate(activeQueryEndDate)}`
+                  ) : (
+                    activeQueryStartDate === activeQueryEndDate
+                      ? `Date: ${formatDate(activeQueryStartDate)}`
+                      : `Period: ${formatDate(activeQueryStartDate)} to ${formatDate(activeQueryEndDate)}`
+                  )}
+                </h3>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Print Statement Button */}
+                <button
+                  type="button"
+                  onClick={handlePrintProfitLoss}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-600/70 hover:bg-indigo-600 text-white rounded-xl text-xs font-bold border border-indigo-400/40 shadow transition active:scale-95 cursor-pointer"
+                  title={language === 'bn' ? 'লাভ-ক্ষতি বিবরণী প্রিন্ট করুন' : 'Print Profit & Loss Statement'}
+                >
+                  <Printer className="w-3.5 h-3.5 text-amber-300" />
+                  <span>{language === 'bn' ? 'বিবরণী প্রিন্ট' : 'Print Statement'}</span>
+                </button>
+
+                {/* Total Sold KG Badge */}
+                <div className="bg-purple-500/20 border border-purple-400/40 text-purple-200 px-3.5 py-2 rounded-xl text-right">
+                  <span className="text-[10.5px] uppercase font-bold block text-white/70">
+                    {language === 'bn' ? 'মোট বিক্রিত মাল' : 'Total Sold Weight'}
+                  </span>
+                  <p className="text-lg sm:text-xl font-black text-purple-300">
+                    {toBengaliNumber(totalSoldWeight)} <span className="text-xs font-bold text-white/80">{language === 'bn' ? 'কেজি' : 'KG'}</span>
+                  </p>
+                </div>
+
+                {/* Net Profit / Loss Badge */}
+                <div className={`px-4 py-2 rounded-xl text-right border ${
+                  netProfit >= 0 
+                    ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-300' 
+                    : 'bg-rose-500/20 border-rose-400/40 text-rose-300'
+                }`}>
+                  <span className="text-[10.5px] uppercase font-bold block text-white/70">
+                    {netProfit >= 0 
+                      ? (language === 'bn' ? 'সর্বমোট নিট লাভ (Net Profit)' : 'Total Net Profit') 
+                      : (language === 'bn' ? 'সর্বমোট নিট লোকসান (Net Loss)' : 'Total Net Loss')}
+                  </span>
+                  <p className="text-xl sm:text-2xl font-black">
+                    {netProfit >= 0 ? `+${toBengaliNumber(netProfit)} ৳` : `-${toBengaliNumber(Math.abs(netProfit))} ৳`}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Metric Cards Grid - 5 Cards including Sold KG */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 text-xs">
+              
+              {/* Card 1: মোট বিক্রিত মাল (ওজন) */}
+              <div className="bg-purple-950/40 p-3 sm:p-3.5 rounded-xl border border-purple-400/30 space-y-1">
+                <span className="text-purple-200 text-[11px] font-semibold flex items-center justify-between">
+                  <span>{language === 'bn' ? 'মোট বিক্রিত মাল (ওজন)' : 'Total Sold (KG)'}</span>
+                  <Scale className="w-3.5 h-3.5 text-purple-300" />
+                </span>
+                <p className="text-base sm:text-lg font-black text-purple-300">
+                  {toBengaliNumber(totalSoldWeight)} <span className="text-xs font-bold text-purple-200">{language === 'bn' ? 'কেজি' : 'KG'}</span>
+                </p>
+                <p className="text-[10px] text-white/60">
+                  {language === 'bn' ? 'নির্বাচিত সময়ের মোট বিক্রয়' : 'Total sales volume'}
+                </p>
+              </div>
+
+              {/* Card 2: মোট বিক্রয়মূল্য */}
+              <div className="bg-white/10 p-3 sm:p-3.5 rounded-xl border border-white/10 space-y-1">
+                <span className="text-indigo-200 text-[11px] font-semibold flex items-center justify-between">
+                  <span>{language === 'bn' ? 'মোট বিক্রয়মূল্য' : 'Total Sales Revenue'}</span>
+                  <DollarSign className="w-3.5 h-3.5 text-indigo-300" />
+                </span>
+                <p className="text-base sm:text-lg font-bold text-white">
+                  {toBengaliNumber(totalSalesRevenue)} ৳
+                </p>
+                <p className="text-[10px] text-white/60">
+                  {language === 'bn' ? 'মোট ইনভয়েস বিল' : 'Gross invoice total'}
+                </p>
+              </div>
+
+              {/* Card 3: মালের ক্রয়মূল্য */}
+              <div className="bg-white/10 p-3 sm:p-3.5 rounded-xl border border-white/10 space-y-1">
+                <span className="text-amber-200 text-[11px] font-semibold flex items-center justify-between">
+                  <span>{language === 'bn' ? 'মালের ক্রয়মূল্য (COGS)' : 'Cost of Goods (COGS)'}</span>
+                  <Package className="w-3.5 h-3.5 text-amber-300" />
+                </span>
+                <p className="text-base sm:text-lg font-bold text-amber-200">
+                  {toBengaliNumber(totalCostOfGoods)} ৳
+                </p>
+                <p className="text-[10px] text-white/60">
+                  {language === 'bn' ? 'বিক্রিত মালের আসল দর' : 'Original purchase cost'}
+                </p>
+              </div>
+
+              {/* Card 4: গ্রস লাভ (বিক্রয় - ক্রয়) */}
+              <div className="bg-white/10 p-3 sm:p-3.5 rounded-xl border border-white/10 space-y-1">
+                <span className="text-teal-200 text-[11px] font-semibold flex items-center justify-between">
+                  <span>{language === 'bn' ? 'গ্রস লাভ (বিক্রি - ক্রয়)' : 'Gross Profit (Sales - Cost)'}</span>
+                  <TrendingUp className="w-3.5 h-3.5 text-teal-300" />
+                </span>
+                <p className={`text-base sm:text-lg font-bold ${grossProfit >= 0 ? 'text-teal-300' : 'text-rose-300'}`}>
+                  {grossProfit >= 0 ? '+' : ''}{toBengaliNumber(grossProfit)} ৳
+                </p>
+                <p className="text-[10px] text-white/60">
+                  {language === 'bn' ? 'দোকান খরচ বাদ দেওয়ার পূর্বে' : 'Before shop expenses'}
+                </p>
+              </div>
+
+              {/* Card 5: দোকানের মোট খরচ */}
+              <div className="bg-white/10 p-3 sm:p-3.5 rounded-xl border border-white/10 space-y-1">
+                <span className="text-rose-200 text-[11px] font-semibold flex items-center justify-between">
+                  <span>{language === 'bn' ? 'দোকানের মোট খরচ' : 'Shop Expenses'}</span>
+                  <Receipt className="w-3.5 h-3.5 text-rose-300" />
+                </span>
+                <p className="text-base sm:text-lg font-bold text-rose-300">
+                  {toBengaliNumber(totalPeriodExpenses)} ৳
+                </p>
+                <p className="text-[10px] text-white/60">
+                  {language === 'bn' ? 'দৈনিক ও পরিচালনা খরচ' : 'Daily overhead expenses'}
+                </p>
+              </div>
+
+            </div>
+
+            {/* Note & Formula */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-indigo-200/80 pt-1 border-t border-white/10">
+              <span>
+                💡 {language === 'bn' 
+                  ? <>হিসাব সূত্র: <strong className="text-white">নিট লাভ = (মোট বিক্রয় - মালের ক্রয়মূল্য) - দোকানের খরচ</strong></> 
+                  : <>Formula: <strong className="text-white">Net Profit = (Total Sales - COGS) - Shop Expenses</strong></>}
+              </span>
+              {totalSalesRevenue > 0 && (
+                <span className="bg-white/10 px-2 py-0.5 rounded text-white font-semibold self-start sm:self-auto">
+                  {language === 'bn' ? 'লাভের অনুপাত (Profit Margin): ' : 'Profit Margin: '}{toBengaliNumber(profitMarginPercent)}%
+                </span>
+              )}
+            </div>
+
+          </div>
+        )}
 
         {/* Table View matching screenshot */}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs sm:text-sm border-collapse">
             <thead>
               <tr className="bg-slate-100/90 text-slate-700 font-bold border-b border-slate-300">
-                <th className="py-3 px-3">মেমো</th>
-                <th className="py-3 px-3">কাস্টমার</th>
-                <th className="py-3 px-3 text-center">বিক্রি</th>
-                <th className="py-3 px-3 text-center">ডিসকাউন্ট</th>
-                <th className="py-3 px-3 text-center">নগদ</th>
-                <th className="py-3 px-3 text-center">অন্যান্য মাধ্যম</th>
-                <th className="py-3 px-3 text-center">বাকি</th>
-                <th className="py-3 px-3 text-center">অ্যাকশন</th>
+                <th className="py-3 px-3">{language === 'bn' ? 'মেমো' : 'Memo'}</th>
+                <th className="py-3 px-3">{language === 'bn' ? 'কাস্টমার' : 'Customer'}</th>
+                <th className="py-3 px-3 text-center">{language === 'bn' ? 'পরিমাণ (কেজি)' : 'Qty (KG)'}</th>
+                <th className="py-3 px-3 text-center">{language === 'bn' ? 'বিক্রি' : 'Sale'}</th>
+                <th className="py-3 px-3 text-center">{language === 'bn' ? 'ডিসকাউন্ট' : 'Discount'}</th>
+                <th className="py-3 px-3 text-center">{language === 'bn' ? 'নগদ' : 'Cash'}</th>
+                <th className="py-3 px-3 text-center">{language === 'bn' ? 'অন্যান্য মাধ্যম' : 'Other Pay'}</th>
+                <th className="py-3 px-3 text-center">{language === 'bn' ? 'বাকি' : 'Due'}</th>
+                <th className="py-3 px-3 text-center">{language === 'bn' ? 'অ্যাকশন' : 'Action'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {tableRows.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400 font-medium">
-                    নির্বাচিত তারিখে কোনো লেনদেন নেই
+                  <td colSpan={9} className="py-8 text-center text-slate-400 font-medium">
+                    {language === 'bn' ? 'নির্বাচিত তারিখে কোনো লেনদেন নেই' : 'No transactions found for selected dates'}
                   </td>
                 </tr>
               ) : (
@@ -438,6 +1107,9 @@ export const DateSalesView: React.FC = () => {
                     </td>
                     <td className="py-3 px-3 font-medium">
                       {row.customer}
+                    </td>
+                    <td className="py-3 px-3 text-center font-bold text-purple-700 whitespace-nowrap">
+                      {row.totalKg > 0 ? `${toBengaliNumber(row.totalKg)} কেজি` : '-'}
                     </td>
                     <td className="py-3 px-3 text-center font-bold text-slate-900">
                       {toBengaliNumber(row.sale)} ৳
@@ -455,7 +1127,7 @@ export const DateSalesView: React.FC = () => {
                       {toBengaliNumber(row.due)} ৳
                     </td>
                     <td className="py-3 px-3 text-center">
-                      <div className="flex items-center justify-center gap-2">
+                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
                         {row.type === 'sale' && (
                           <>
                             <button
@@ -467,26 +1139,29 @@ export const DateSalesView: React.FC = () => {
                               <span>মেমো দেখুন</span>
                             </button>
                             <button
+                              onClick={() => handleOpenEditInvoice(row.originalData)}
+                              title="মেমো এডিট করুন"
+                              className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 hover:text-emerald-900 border border-emerald-200 rounded-md transition shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                            >
+                              <Edit className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>এডিট</span>
+                            </button>
+                            <button
                               onClick={() => setInvoiceToPrint(row.originalData)}
                               title="মেমো প্রিন্ট করুন"
                               className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 rounded-md transition cursor-pointer active:scale-95 shrink-0"
                             >
                               <Printer className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleOpenEditInvoice(row.originalData)}
-                              title="এডিট করুন"
-                              className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 border border-transparent hover:border-emerald-200 rounded-md transition cursor-pointer active:scale-95 shrink-0"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteItem(row)}
-                              title="ডিলিট করুন"
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-md transition cursor-pointer active:scale-95 shrink-0"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canEditOrDelete && (
+                              <button
+                                onClick={() => handleDeleteItem(row)}
+                                title="ডিলিট করুন"
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-md transition cursor-pointer active:scale-95 shrink-0"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </>
                         )}
                         {row.type === 'due_collection' && (
@@ -500,26 +1175,29 @@ export const DateSalesView: React.FC = () => {
                               <span>রশিদ দেখুন</span>
                             </button>
                             <button
+                              onClick={() => handleOpenEditDuePayment(row.originalData)}
+                              title="রশিদ এডিট করুন"
+                              className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 hover:text-emerald-900 border border-emerald-200 rounded-md transition shadow-2xs cursor-pointer active:scale-95 shrink-0"
+                            >
+                              <Edit className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>এডিট</span>
+                            </button>
+                            <button
                               onClick={() => setDuePaymentToPrint(row.originalData)}
                               title="রশিদ প্রিন্ট করুন"
                               className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 rounded-md transition cursor-pointer active:scale-95 shrink-0"
                             >
                               <Printer className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleOpenEditDuePayment(row.originalData)}
-                              title="এডিট করুন"
-                              className="p-1.5 text-slate-500 hover:text-emerald-600 hover:bg-emerald-50 border border-transparent hover:border-emerald-200 rounded-md transition cursor-pointer active:scale-95 shrink-0"
-                            >
-                              <Edit className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteItem(row)}
-                              title="ডিলিট করুন"
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-md transition cursor-pointer active:scale-95 shrink-0"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canEditOrDelete && (
+                              <button
+                                onClick={() => handleDeleteItem(row)}
+                                title="ডিলিট করুন"
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-md transition cursor-pointer active:scale-95 shrink-0"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -534,6 +1212,9 @@ export const DateSalesView: React.FC = () => {
               <tr className="bg-slate-50/80 font-bold border-t-2 border-slate-300 text-slate-800">
                 <td colSpan={2} className="py-3.5 px-3 text-left">
                   সর্বমোট যোগফল:
+                </td>
+                <td className="py-3.5 px-3 text-center font-extrabold text-purple-700 whitespace-nowrap">
+                  {totalWeightInTable > 0 ? `${toBengaliNumber(totalWeightInTable)} কেজি` : '-'}
                 </td>
                 <td className="py-3.5 px-3 text-center text-slate-900">
                   {toBengaliNumber(totalSale)} ৳
@@ -570,6 +1251,26 @@ export const DateSalesView: React.FC = () => {
             </div>
             
             <form onSubmit={handleSaveInvoiceEdit} className="p-4 sm:p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+              
+              {/* Load Into Main Form Button */}
+              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 p-3 rounded-xl flex items-center justify-between gap-3">
+                <div className="text-xs text-indigo-950">
+                  <span className="font-bold block">মালামাল ও পণ্য পরিবর্তন করতে চান?</span>
+                  <span className="text-[11px] text-indigo-700">বিক্রিত পণ্যের বিবরণ (Products / Items) সহ মূল ফর্মে এডিট করুন।</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInvoiceToEdit(editingInvoice);
+                    setCurrentTab('new_invoice');
+                    setEditingInvoice(null);
+                  }}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition shadow-xs cursor-pointer active:scale-95 shrink-0 whitespace-nowrap"
+                >
+                  ফর্মে লোড করুন
+                </button>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2 border-b pb-4 mb-2">
                   <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">কাস্টমার তথ্য সংশোধন (ঐচ্ছিক)</h4>
@@ -801,22 +1502,17 @@ export const DateSalesView: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">অন্যান্য মাধ্যম</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">অনলাইন পেমেন্ট মাধ্যম</label>
                   <select
                     value={editDueOnlineMethod}
                     onChange={(e: any) => setEditDueOnlineMethod(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
                   >
-                    <option value="bkash">বিকাশ (bKash)</option>
-                    <option value="nagad">নগদ (Nagad)</option>
-                    <option value="rocket">রকেট (Rocket)</option>
                     <option value="bank">ব্যাংক (Bank)</option>
-                    <option value="cheque">চেক (Cheque)</option>
-                    <option value="goods">মাল বাবদ পেমেন্ট (Goods)</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">অন্যান্য মাধ্যমে টাকা</label>
+                  <label className="block text-sm font-semibold text-slate-700 mb-1">অনলাইন পেমেন্টের টাকা (ব্যাংক)</label>
                   <input 
                     type="text" inputMode="numeric" 
                     value={editOnlinePaid || ''} 

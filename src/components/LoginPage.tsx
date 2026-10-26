@@ -49,18 +49,6 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleQuickLogin = async (userLogin: string, userPass: string) => {
-    setUsername(userLogin);
-    setPassword(userPass);
-    setErrorMessage('');
-    setIsLoading(true);
-    try {
-      await login(userLogin, userPass);
-    } catch {
-      setIsLoading(false);
-    }
-  };
-
   return (
     <div className="min-h-screen whatsapp-bg flex flex-col justify-center items-center p-4 selection:bg-indigo-500 selection:text-white">
 
@@ -68,16 +56,10 @@ export const LoginPage: React.FC = () => {
       <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-xl border border-slate-100 p-6 sm:p-7 space-y-5 animate-in fade-in zoom-in-95 duration-300">
         
         {/* Header Branding */}
-        <div className="text-center space-y-2">
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight flex items-center justify-center gap-2">
-            <span>ML Electric</span>
+        <div className="text-center space-y-1 pb-1">
+          <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight flex items-center justify-center gap-2">
+            <span className="text-indigo-600">RS ONLINE</span> <span>ERP</span>
           </h1>
-          <p className="text-base font-bold text-indigo-700">
-            (এম এল ইলেকট্রিক)
-          </p>
-          <p className="text-xs text-slate-500 font-medium">
-            দোকান ও ব্যবসা হিসাব ব্যবস্থাপনা সফটওয়্যার
-          </p>
         </div>
 
         {/* Error Alert */}

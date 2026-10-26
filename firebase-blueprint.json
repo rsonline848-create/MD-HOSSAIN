@@ -16,6 +16,8 @@
         "openingCashList": { "type": "array", "description": "Opening cash records" },
         "otherCashInList": { "type": "array", "description": "Other cash in records" },
         "users": { "type": "array", "description": "User accounts and managers" },
+        "employees": { "type": "array", "description": "Employee staff accounts, salaries, and profiles" },
+        "employeePayments": { "type": "array", "description": "Employee salary disbursements, advances, and payment records" },
         "auditLogs": { "type": "array", "description": "Audit trail logs" },
         "recycleBin": { "type": "array", "description": "Deleted items in recycle bin" },
         "updatedAt": { "type": "string", "description": "Timestamp of last sync" }

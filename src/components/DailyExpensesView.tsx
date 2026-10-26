@@ -10,7 +10,9 @@ export const DailyExpensesView: React.FC = () => {
     expenses, 
     addExpense, 
     moveToRecycleBin,
-    setExpenses 
+    canEditOrDelete,
+    setExpenses,
+    confirmAction
   } = useApp();
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -44,6 +46,10 @@ export const DailyExpensesView: React.FC = () => {
       }
 
       if (editingId) {
+        if (!canEditOrDelete) {
+          alert('ম্যানেজার একাউন্ট থেকে কোনো খরচ এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+          return;
+        }
         // Also persist editing!
         const updatedExpenses = expenses.map(exp => {
           if (exp.id === editingId) {
@@ -58,8 +64,6 @@ export const DailyExpensesView: React.FC = () => {
           return exp;
         });
         setExpenses(updatedExpenses);
-        // We'll trust the global state updates it? No, setExpenses doesn't sync. We should ideally call an updateExpense function. 
-        // For now, let's at least wrap it in try-catch to see if something else throws.
         setEditingId(null);
       } else {
         addExpense({
@@ -80,15 +84,18 @@ export const DailyExpensesView: React.FC = () => {
     }
   };
 
-  
   const handleEdit = (exp: Expense) => {
+    if (!canEditOrDelete) {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো খরচ এডিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
+    }
     setEditingId(exp.id);
     setCategory(exp.category);
     setAmount(exp.amount.toString());
     setPaymentMethod(exp.paymentMethod);
     setDescription(exp.description || '');
     categoryRef.current?.focus();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    categoryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
   const handleCancelEdit = () => {
@@ -100,14 +107,24 @@ export const DailyExpensesView: React.FC = () => {
   };
 
   const handleDelete = (exp: Expense) => {
-    if (confirm(`আপনি কি এই খরচের এন্ট্রি (${exp.category} - ${exp.amount}৳) রিসাইকেল বিনে পাঠাতে চান?`)) {
-      moveToRecycleBin('expense', `খরচ: ${exp.category} (${exp.description})`, exp, exp.amount);
-      setExpenses(prev => prev.filter(e => e.id !== exp.id));
+    if (!canEditOrDelete) {
+      alert('ম্যানেজার একাউন্ট থেকে কোনো খরচ ডিলিট করার অনুমতি নেই। শুধুমাত্র অ্যাডমিন এটি করতে পারবেন।');
+      return;
     }
+    confirmAction({
+      title: 'খরচ মুছে ফেলুন',
+      message: `আপনি কি এই খরচের এন্ট্রি (${exp.category} - ${toBengaliNumber(exp.amount)} ৳) রিসাইকেল বিনে পাঠাতে চান?`,
+      confirmText: 'হ্যাঁ, মুছুন',
+      isDestructive: true,
+      onConfirm: () => {
+        moveToRecycleBin('expense', `খরচ: ${exp.category} (${exp.description})`, exp, exp.amount);
+        setExpenses(prev => prev.filter(e => e.id !== exp.id));
+      }
+    });
   };
 
   const handleDownloadPDF = () => {
-    const dateText = `${toBengaliNumber(appliedStartDate)} থেকে ${toBengaliNumber(appliedEndDate)}`;
+    const dateText = `${formatDate(appliedStartDate)} থেকে ${formatDate(appliedEndDate)}`;
     const htmlContent = `
       <div style="font-family: sans-serif; padding: 20px; color: #333;">
         <h2 style="text-align: center; margin-bottom: 5px;">খরচের তালিকা</h2>
@@ -234,6 +251,9 @@ export const DailyExpensesView: React.FC = () => {
                 </tr>
               </tfoot>
             </table>
+            <div style="text-align: center; font-size: 10px; color: #64748b; font-weight: 600; margin-top: 25px; padding-top: 6px; border-top: 1px dashed #cbd5e1;">
+              App Developer: RS ONLINE - 01611814813
+            </div>
           </body>
         </html>
       `);
@@ -352,6 +372,18 @@ export const DailyExpensesView: React.FC = () => {
                 }}
                 className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs font-semibold focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {['কর্মচারী বেতন', 'দোকান ভাড়া', 'বিদ্যুৎ বিল', 'নাস্তা / খাবার', 'পরিবহন', 'চা / আপ্যায়ন'].map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setCategory(cat)}
+                    className="text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md transition cursor-pointer"
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div>
@@ -478,20 +510,28 @@ export const DailyExpensesView: React.FC = () => {
                       <td className="p-2.5 text-center text-slate-500 font-medium">{exp.recordedBy || exp.createdBy || 'Admin'}</td>
                       <td className="p-2.5 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => handleEdit(exp)}
-                            className="p-1 text-indigo-500 hover:bg-indigo-50 rounded"
-                            title="এডিট করুন"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(exp)}
-                            className="p-1 text-rose-500 hover:bg-rose-50 rounded"
-                            title="মুছুন"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {canEditOrDelete ? (
+                            <>
+                              <button
+                                onClick={() => handleEdit(exp)}
+                                className="p-1 text-indigo-500 hover:bg-indigo-50 rounded transition cursor-pointer active:scale-95"
+                                title="এডিট করুন"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDelete(exp)}
+                                className="p-1 text-rose-500 hover:bg-rose-50 rounded transition cursor-pointer active:scale-95"
+                                title="মুছুন"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-[10px] text-slate-400 font-medium px-2 py-0.5 bg-slate-100 rounded-md border border-slate-200">
+                              🔒 সুরক্ষিত
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>

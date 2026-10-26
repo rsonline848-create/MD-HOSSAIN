@@ -18,7 +18,11 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Menu,
-  X
+  X,
+  Package,
+  ArrowLeftRight,
+  Landmark,
+  UserCheck
 } from 'lucide-react';
 import { toBengaliNumber } from '../utils/formatters';
 
@@ -28,22 +32,29 @@ export const Navigation: React.FC = () => {
     setCurrentTab, 
     recycleBin, 
     setActiveModal, 
-    exportBackupJson
+    exportBackupJson,
+    canEditOrDelete,
+    language,
+    t
   } = useApp();
 
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const tabs: { id: TabType; label: string; icon: React.FC<{ className?: string }> }[] = [
-    { id: 'dashboard', label: 'ড্যাশবোর্ড', icon: LayoutDashboard },
-    { id: 'new_invoice', label: 'নতুন ইনভয়েস (বিক্রি)', icon: FileText },
-    { id: 'due_collection', label: 'বাকি আদায় (পেমেন্ট)', icon: HandCoins },
-    { id: 'supplier_bill', label: 'মাল ক্রয় (সাপ্লায়ার বিল)', icon: ShoppingCart },
-    { id: 'date_sales', label: 'তারিখভিত্তিক বিক্রি', icon: CalendarRange },
-    { id: 'customers', label: 'কাস্টমার লিস্ট', icon: Users },
-    { id: 'suppliers', label: 'সাপ্লায়ার লিস্ট', icon: Truck },
-    { id: 'daily_expenses', label: 'দৈনিক খরচ', icon: Receipt },
-    { id: 'cash_tally', label: 'ক্যাশ মিলানো', icon: Calculator },
+    { id: 'dashboard', label: language === 'bn' ? 'ড্যাশবোর্ড' : 'Dashboard', icon: LayoutDashboard },
+    { id: 'new_invoice', label: language === 'bn' ? 'নতুন ইনভয়েস (বিক্রি)' : 'New Invoice (Sale)', icon: FileText },
+    { id: 'exchange', label: language === 'bn' ? 'এক্সচেঞ্জ (মাল পরিবর্তন)' : 'Exchange (Return)', icon: ArrowLeftRight },
+    { id: 'due_collection', label: language === 'bn' ? 'বাকি আদায় (পেমেন্ট)' : 'Due Collection', icon: HandCoins },
+    { id: 'supplier_bill', label: language === 'bn' ? 'মাল ক্রয় (সাপ্লায়ার বিল)' : 'Purchase & Supplier Bills', icon: ShoppingCart },
+    { id: 'products', label: language === 'bn' ? 'প্রোডাক্ট / স্টক' : 'Products & Stock', icon: Package },
+    { id: 'date_sales', label: language === 'bn' ? 'তারিখভিত্তিক বিক্রি' : 'Date-wise Sales', icon: CalendarRange },
+    { id: 'customers', label: language === 'bn' ? 'কাস্টমার লিস্ট' : 'Customer List', icon: Users },
+    { id: 'suppliers', label: language === 'bn' ? 'সাপ্লায়ার লিস্ট' : 'Supplier List', icon: Truck },
+    { id: 'employees', label: language === 'bn' ? 'কর্মচারী ও বেতন' : 'Staff & Salary', icon: UserCheck },
+    { id: 'daily_expenses', label: language === 'bn' ? 'দৈনিক খরচ' : 'Daily Expenses', icon: Receipt },
+    { id: 'cash_tally', label: language === 'bn' ? 'ক্যাশ মিলানো' : 'Cash Tally', icon: Calculator },
+    { id: 'investment_loans', label: language === 'bn' ? 'বিনিয়োগ ও ব্যাংক ঋণ' : 'Investment & Loans', icon: Landmark },
   ];
 
   const activeTabObj = tabs.find(t => t.id === currentTab) || tabs[0];
@@ -56,14 +67,14 @@ export const Navigation: React.FC = () => {
   return (
     <>
       {/* Mobile Top-Left Menu Bar Trigger (< 640px) */}
-      <div className="sm:hidden flex items-center justify-between bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 py-2.5 shadow-xs print:hidden">
+      <div className="sm:hidden shrink-0 flex items-center justify-between bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 py-2.5 shadow-xs print:hidden z-20">
         <button
           type="button"
           onClick={() => setMobileMenuOpen(true)}
           className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
         >
           <Menu className="w-4 h-4" />
-          <span>মেনু বার</span>
+          <span>{language === 'bn' ? 'মেনু বার' : 'Menu'}</span>
         </button>
         <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1 rounded-lg border border-slate-200">
           <activeTabObj.icon className="w-3.5 h-3.5 text-indigo-600" />
@@ -82,9 +93,9 @@ export const Navigation: React.FC = () => {
       {/* Left Sidebar Menu Bar */}
       <aside
         className={`print:hidden bg-white/95 backdrop-blur-md border-r border-slate-200/90 shadow-sm flex flex-col justify-between transition-all duration-200 z-40
-          ${mobileMenuOpen ? 'fixed inset-y-0 left-0 w-64 shadow-2xl' : 'hidden sm:flex'}
+          ${mobileMenuOpen ? 'fixed inset-y-0 left-0 w-64 shadow-2xl z-50' : 'hidden sm:flex'}
           ${isCollapsed ? 'sm:w-18' : 'sm:w-60 lg:w-64'}
-          sm:sticky sm:top-[60px] sm:h-[calc(100vh-60px)] sm:overflow-y-auto shrink-0
+          sm:h-full sm:overflow-y-auto shrink-0
         `}
       >
         <div className="p-3 space-y-2">
@@ -146,59 +157,63 @@ export const Navigation: React.FC = () => {
 
         {/* Bottom Action Buttons (Recycle Bin, Backup Upload, Backup Download, Refresh) */}
         <div className="p-3 pt-2.5 border-t border-slate-200/80 bg-slate-50/70 flex flex-col gap-2">
-          {/* Recycle Bin Button */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveModal('recycle_bin');
-              setMobileMenuOpen(false);
-            }}
-            title="রিসাইকেল বিন"
-            className={`w-full flex items-center ${
-              isCollapsed ? 'justify-center px-2' : 'justify-between px-3'
-            } bg-rose-600 hover:bg-rose-700 text-white py-2 rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer`}
-          >
-            <div className="flex items-center gap-2 truncate">
-              <Trash2 className="w-3.5 h-3.5 shrink-0" />
-              {!isCollapsed && <span className="truncate">রিসাইকেল বিন</span>}
-            </div>
-            {!isCollapsed && (
-              <span className="bg-white text-rose-700 font-extrabold px-1.5 py-0.5 rounded-full text-[11px] leading-none shrink-0">
-                {toBengaliNumber(recycleBin.length)}
-              </span>
-            )}
-          </button>
+          {canEditOrDelete && (
+            <>
+              {/* Recycle Bin Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveModal('recycle_bin');
+                  setMobileMenuOpen(false);
+                }}
+                title={language === 'bn' ? 'রিসাইকেল বিন' : 'Recycle Bin'}
+                className={`w-full flex items-center ${
+                  isCollapsed ? 'justify-center px-2' : 'justify-between px-3'
+                } bg-rose-600 hover:bg-rose-700 text-white py-2 rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                  {!isCollapsed && <span className="truncate">{language === 'bn' ? 'রিসাইকেল বিন' : 'Recycle Bin'}</span>}
+                </div>
+                {!isCollapsed && (
+                  <span className="bg-white text-rose-700 font-extrabold px-1.5 py-0.5 rounded-full text-[11px] leading-none shrink-0">
+                    {toBengaliNumber(recycleBin.length)}
+                  </span>
+                )}
+              </button>
 
-          {/* Backup Upload */}
-          <button
-            type="button"
-            onClick={() => {
-              setActiveModal('backup_upload');
-              setMobileMenuOpen(false);
-            }}
-            title="ব্যাকআপ আপলোড"
-            className={`w-full flex items-center ${
-              isCollapsed ? 'justify-center px-2' : 'justify-start gap-2 px-3'
-            } bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer`}
-          >
-            <Upload className="w-3.5 h-3.5 shrink-0" />
-            {!isCollapsed && <span className="truncate">ব্যাকআপ আপলোড</span>}
-          </button>
+              {/* Backup Upload */}
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveModal('backup_upload');
+                  setMobileMenuOpen(false);
+                }}
+                title={language === 'bn' ? 'ব্যাকআপ আপলোড' : 'Upload Backup'}
+                className={`w-full flex items-center ${
+                  isCollapsed ? 'justify-center px-2' : 'justify-start gap-2 px-3'
+                } bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer`}
+              >
+                <Upload className="w-3.5 h-3.5 shrink-0" />
+                {!isCollapsed && <span className="truncate">{language === 'bn' ? 'ব্যাকআপ আপলোড' : 'Upload Backup'}</span>}
+              </button>
+            </>
+          )}
 
           {/* Backup Download */}
           <button
             type="button"
             onClick={() => {
-              exportBackupJson();
+              setActiveModal('backup_download_options');
               setMobileMenuOpen(false);
             }}
-            title="ব্যাকআপ ডাউনলোড"
+            title={language === 'bn' ? 'ব্যাকআপ ডাউনলোড' : 'Download Backup'}
             className={`w-full flex items-center ${
               isCollapsed ? 'justify-center px-2' : 'justify-start gap-2 px-3'
             } bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer`}
           >
             <Download className="w-3.5 h-3.5 shrink-0" />
-            {!isCollapsed && <span className="truncate">ব্যাকআপ ডাউনলোড</span>}
+            {!isCollapsed && <span className="truncate">{language === 'bn' ? 'ব্যাকআপ ডাউনলোড' : 'Download Backup'}</span>}
           </button>
 
           {/* Refresh */}
@@ -207,13 +222,13 @@ export const Navigation: React.FC = () => {
             onClick={() => {
               window.location.reload();
             }}
-            title="রিফ্রেশ"
+            title={language === 'bn' ? 'রিফ্রেশ' : 'Refresh'}
             className={`w-full flex items-center ${
               isCollapsed ? 'justify-center px-2' : 'justify-start gap-2 px-3'
             } bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer`}
           >
             <RotateCw className="w-3.5 h-3.5 shrink-0" />
-            {!isCollapsed && <span className="truncate">রিফ্রেশ</span>}
+            {!isCollapsed && <span className="truncate">{language === 'bn' ? 'রিফ্রেশ' : 'Refresh'}</span>}
           </button>
         </div>
       </aside>

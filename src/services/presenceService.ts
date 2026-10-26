@@ -115,7 +115,7 @@ export const sendPresenceLogout = async (userId: string): Promise<void> => {
  * Calculates whether a presence record is actively online based on heartbeat timestamp
  */
 export const isPresenceOnline = (presence: UserPresence | undefined | null): boolean => {
-  if (!presence) return false;
+  if (!presence || typeof presence !== 'object') return false;
   if (presence.isOnline === false) return false;
   if (!presence.lastActive) return false;
   const lastActiveTime = new Date(presence.lastActive).getTime();
@@ -136,10 +136,13 @@ export const subscribeToPresence = (
 
   const handleIncomingList = (incoming: UserPresence[]) => {
     if (!isSubscribed) return;
-    const evaluated = incoming.map(p => ({
-      ...p,
-      isOnline: isPresenceOnline(p)
-    }));
+    if (!Array.isArray(incoming)) return;
+    const evaluated = incoming
+      .filter((p: any) => p && typeof p === 'object' && p.userId)
+      .map(p => ({
+        ...p,
+        isOnline: isPresenceOnline(p)
+      }));
     saveCachedPresenceList(evaluated);
     onUpdate(evaluated);
   };

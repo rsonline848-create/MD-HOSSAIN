@@ -349,7 +349,7 @@ export const BranchModal: React.FC = () => {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h4 className="font-bold text-slate-800 text-sm">প্রধান কার্যালয় (এম এল ইলেকট্রিক)</h4>
+                    <h4 className="font-bold text-slate-800 text-sm">প্রধান কার্যালয় (বিসমিল্লাহ ট্রেডার্স)</h4>
                     {activeBranchId === 'ml_electric_main' && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-600 text-white">
                         বর্তমান সক্রিয় শাখা

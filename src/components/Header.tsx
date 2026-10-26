@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { User, LogOut, ShieldCheck, Key, Cloud, CloudCheck, RefreshCw, Settings, MapPin, Home, Zap, Award, Users } from 'lucide-react';
+import { User, LogOut, ShieldCheck, Key, Cloud, CloudCheck, RefreshCw, Settings, MapPin, Home, Zap, Award, Users, Languages } from 'lucide-react';
 import { toBengaliNumber } from '../utils/formatters';
 
 export const Header: React.FC = () => {
@@ -17,11 +17,9 @@ export const Header: React.FC = () => {
     cloudSyncTime, 
     isSyncingNow, 
     forceSyncFromCloud,
-    setIsLicenseManagerOpen,
-    isLicenseExpired,
-    licenseDaysLeft,
-    activeOnlineUsersCount,
-    setIsOnlineUsersModalOpen
+    language,
+    setLanguage,
+    t
   } = useApp();
   const [showUserDropdown, setShowUserDropdown] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -40,11 +38,15 @@ export const Header: React.FC = () => {
     ? (localStorage.getItem(`ML_ELECTRIC_${activeBranchId}_BRANCH_NAME`) || '')
     : '';
 
+  const isMainOffice = activeBranchId === 'bismillah_traders_main' || activeBranchId === 'ml_electric_main';
+
   const branchNameDisplay = 
     currentBranch?.name || 
     currentUser?.branchName || 
     cachedBranchName || 
-    (activeBranchId === 'ml_electric_main' ? 'প্রধান কার্যালয়' : 'শাখা');
+    (isMainOffice 
+      ? (language === 'bn' ? 'প্রধান কার্যালয়' : 'Head Office') 
+      : (language === 'bn' ? 'শাখা' : 'Branch'));
 
   const handleLogoutConfirm = () => {
     setShowLogoutModal(false);
@@ -54,7 +56,7 @@ export const Header: React.FC = () => {
   const isAdmin = currentUser?.role === 'admin';
 
   return (
-    <header className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-purple-800 text-white shadow-md sticky top-0 z-30">
+    <header className="bg-gradient-to-r from-indigo-700 via-indigo-800 to-purple-800 text-white shadow-md z-30 shrink-0 print:hidden">
       <div className="w-full px-3 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between gap-3 overflow-x-auto no-scrollbar min-h-[60px]">
         
         {/* Brand Name, Status & User Profile */}
@@ -62,12 +64,16 @@ export const Header: React.FC = () => {
           <div className="flex items-center gap-2 cursor-pointer select-none">
             <div className="flex flex-col">
               <h1 className="text-lg sm:text-xl font-black tracking-tight leading-none text-white whitespace-nowrap">
-                ML Electric
+                Bismillah Traders
               </h1>
-              {activeBranchId !== 'ml_electric_main' ? (
-                <span className="text-xs font-semibold text-emerald-300 whitespace-nowrap leading-tight mt-1">শাখা: {branchNameDisplay}</span>
+              {!isMainOffice ? (
+                <span className="text-xs font-semibold text-emerald-300 whitespace-nowrap leading-tight mt-1">
+                  {language === 'bn' ? 'শাখা: ' : 'Branch: '}{branchNameDisplay}
+                </span>
               ) : (
-                <span className="text-xs font-medium text-indigo-200 whitespace-nowrap leading-tight mt-1">প্রধান কার্যালয়</span>
+                <span className="text-xs font-medium text-indigo-200 whitespace-nowrap leading-tight mt-1">
+                  {language === 'bn' ? 'বিসমিল্লাহ ট্রেডার্স (প্রধান কার্যালয়)' : 'Bismillah Traders (Head Office)'}
+                </span>
               )}
             </div>
           </div>
@@ -80,12 +86,12 @@ export const Header: React.FC = () => {
                   ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-200' 
                   : 'bg-amber-500/20 border-amber-400/40 text-amber-200'
               }`}
-              title={`Google Firebase Firestore রিয়েল-টাইমে সংযুক্ত ${cloudSyncTime ? `| শেষ আপডেট: ${cloudSyncTime}` : ''}`}
+              title={`Google Firebase Firestore ${language === 'bn' ? 'রিয়েল-টাইমে সংযুক্ত' : 'Live Connected'} ${cloudSyncTime ? `| ${language === 'bn' ? 'শেষ আপডেট: ' : 'Last: '}${cloudSyncTime}` : ''}`}
             >
               <span className={`inline-block w-2 h-2 rounded-full ${isCloudSynced ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
               <Cloud className="w-3.5 h-3.5" />
               <span className="hidden xl:inline">
-                {isSyncingNow ? 'সিঙ্ক...' : isCloudSynced ? 'ক্লাউড লাইভ সিঙ্ক' : 'অফলাইন'}
+                {isSyncingNow ? t('header.syncing', 'সিঙ্ক...') : isCloudSynced ? t('header.cloud_sync', 'ক্লাউড লাইভ সিঙ্ক') : t('header.offline', 'অফলাইন')}
               </span>
               {cloudSyncTime && (
                 <span className="text-[11px] opacity-85">({cloudSyncTime})</span>
@@ -94,7 +100,7 @@ export const Header: React.FC = () => {
             <button
               onClick={() => forceSyncFromCloud()}
               disabled={isSyncingNow}
-              title="ক্লাউড থেকে তাৎক্ষণিক রিফ্রেশ ও সিঙ্ক করুন"
+              title={t('header.refresh_tooltip', 'ক্লাউড থেকে তাৎক্ষণিক রিফ্রেশ ও সিঙ্ক করুন')}
               className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 active:scale-95 transition text-indigo-100 disabled:opacity-50 cursor-pointer shrink-0"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncingNow ? 'animate-spin' : ''}`} />
@@ -170,7 +176,7 @@ export const Header: React.FC = () => {
           </div>
 
           {/* Return to Main Branch Button if in Sub-Branch (Admin only) */}
-          {isAdmin && activeBranchId !== 'ml_electric_main' && (
+          {isAdmin && !isMainOffice && (
             <button
               onClick={returnToMainApp}
               className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white px-2 py-1 rounded-md text-[11px] sm:text-xs font-bold shadow-xs hover:shadow active:scale-95 transition cursor-pointer whitespace-nowrap shrink-0"
@@ -182,9 +188,25 @@ export const Header: React.FC = () => {
           )}
         </div>
 
-        {/* Far Right Action Buttons (১ লাইনে ব্রাঞ্চ, সেটিংস, লাইসেন্স, অনলাইন ইউজার, লগআউট) */}
+        {/* Far Right Action Buttons (১ লাইনে ভাষা, ব্রাঞ্চ, সেটিংস, অনলাইন ইউজার, লগআউট) */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 whitespace-nowrap">
-          {/* Admin only: ব্রাঞ্চ, সেটিংস, লাইসেন্স, অনলাইন ইউজার */}
+          
+          {/* ভাষা পরিবর্তন বাটন (Language Switcher) */}
+          <button
+            type="button"
+            onClick={() => setLanguage(language === 'bn' ? 'en' : 'bn')}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-black shadow-2xs hover:shadow-xs active:scale-95 transition cursor-pointer border shrink-0 ${
+              language === 'en'
+                ? 'bg-amber-400 text-slate-900 border-amber-300 shadow-amber-900/30 ring-1 ring-white/50'
+                : 'bg-white/15 hover:bg-white/25 text-white border-white/20'
+            }`}
+            title={language === 'bn' ? 'Switch application to English' : 'অ্যাপ বাংলায় রূপান্তর করুন'}
+          >
+            <Languages className={`w-3.5 h-3.5 ${language === 'en' ? 'text-slate-900' : 'text-amber-300'} shrink-0`} />
+            <span className="tracking-wide">{language === 'bn' ? 'বাংলা' : 'English'}</span>
+          </button>
+
+          {/* Admin only: ব্রাঞ্চ, সেটিংস, অনলাইন ইউজার */}
           {isAdmin && (
             <>
               {/* ১. ব্রাঞ্চ */}
@@ -192,10 +214,10 @@ export const Header: React.FC = () => {
                 id="header-branch-btn"
                 onClick={() => setActiveModal('branch')}
                 className="flex items-center gap-1 bg-slate-100 hover:bg-white text-slate-800 px-2.5 py-1.5 rounded-md text-xs font-bold shadow-2xs hover:shadow-xs active:scale-95 transition cursor-pointer border border-slate-200 shrink-0"
-                title="শাখা ও ব্রাঞ্চ নিয়ন্ত্রণ"
+                title={language === 'bn' ? 'শাখা ও ব্রাঞ্চ নিয়ন্ত্রণ' : 'Branch Management'}
               >
                 <MapPin className="w-3 h-3 text-indigo-600 shrink-0" />
-                <span>ব্রাঞ্চ</span>
+                <span>{language === 'bn' ? 'ব্রাঞ্চ' : 'Branch'}</span>
               </button>
               
               {/* ২. সেটিংস */}
@@ -203,44 +225,10 @@ export const Header: React.FC = () => {
                 id="header-settings-btn"
                 onClick={() => setActiveModal('settings')}
                 className="flex items-center gap-1 bg-slate-100 hover:bg-white text-slate-800 px-2.5 py-1.5 rounded-md text-xs font-bold shadow-2xs hover:shadow-xs active:scale-95 transition cursor-pointer border border-slate-200 shrink-0"
-                title="সফটওয়্যার সেটিংস"
+                title={language === 'bn' ? 'সফটওয়্যার সেটিংস' : 'Software Settings'}
               >
                 <Settings className="w-3 h-3 text-slate-700 shrink-0" />
-                <span>সেটিংস</span>
-              </button>
-
-              {/* ৩. লাইসেন্স */}
-              <button
-                id="header-license-btn"
-                onClick={() => setIsLicenseManagerOpen(true)}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-bold shadow-2xs hover:shadow-xs active:scale-95 transition cursor-pointer shrink-0 ${
-                  isLicenseExpired
-                    ? 'bg-rose-500 hover:bg-rose-600 text-white animate-pulse'
-                    : 'bg-indigo-900/80 hover:bg-indigo-950 text-indigo-100 border border-indigo-400/40'
-                }`}
-                title="লাইসেন্স ও সাবস্ক্রিপশন নিয়ন্ত্রণ"
-              >
-                <Award className="w-3 h-3 text-amber-300 shrink-0" />
-                <span>লাইসেন্স</span>
-              </button>
-
-              {/* ৪. অনলাইন ইউজার (১) */}
-              <button
-                id="header-online-users-btn"
-                type="button"
-                onClick={() => setIsOnlineUsersModalOpen(true)}
-                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-md text-xs font-bold shadow-2xs hover:shadow-xs active:scale-95 transition cursor-pointer border border-emerald-400/40 relative shrink-0"
-                title={`অনলাইন ইউজার উপস্থিতি তালিকা (${activeOnlineUsersCount} জন সক্রিয়)`}
-              >
-                <span className="relative flex h-1.5 w-1.5 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-300 opacity-85"></span>
-                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-400 border border-white"></span>
-                </span>
-                <Users className="w-3 h-3 shrink-0" />
-                <span>অনলাইন ইউজার</span>
-                <span className="bg-emerald-950/50 text-emerald-100 text-[10px] font-black px-1.5 py-0.2 rounded-full border border-emerald-400/30 leading-none">
-                  {toBengaliNumber(activeOnlineUsersCount)}
-                </span>
+                <span>{language === 'bn' ? 'সেটিংস' : 'Settings'}</span>
               </button>
             </>
           )}
@@ -250,10 +238,10 @@ export const Header: React.FC = () => {
             id="header-logout-btn"
             onClick={() => setShowLogoutModal(true)}
             className="flex items-center gap-1 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white px-2.5 sm:px-3 py-1.5 rounded-md text-xs font-bold shadow-2xs hover:shadow-sm active:scale-95 transition cursor-pointer border border-rose-400/30 shrink-0"
-            title="সফটওয়্যার থেকে লগআউট করুন"
+            title={language === 'bn' ? 'সফটওয়্যার থেকে লগআউট করুন' : 'Log out from application'}
           >
             <LogOut className="w-3 h-3 shrink-0" />
-            <span>লগআউট</span>
+            <span>{language === 'bn' ? 'লগআউট' : 'Logout'}</span>
           </button>
         </div>
       </div>
@@ -267,13 +255,17 @@ export const Header: React.FC = () => {
                 <LogOut className="w-5 h-5 text-rose-600" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-800">লগআউট নিশ্চিতকরণ</h3>
-                <p className="text-xs text-slate-500">আইডি: {currentUser.name}</p>
+                <h3 className="text-base font-bold text-slate-800">
+                  {language === 'bn' ? 'লগআউট নিশ্চিতকরণ' : 'Confirm Logout'}
+                </h3>
+                <p className="text-xs text-slate-500">{language === 'bn' ? 'আইডি: ' : 'User: '}{currentUser.name}</p>
               </div>
             </div>
             
             <p className="text-xs text-slate-600 leading-relaxed">
-              আপনি কি নিশ্চিত যে সফটওয়্যার থেকে লগআউট করে লগইন স্ক্রিনে ফিরে যেতে চান?
+              {language === 'bn' 
+                ? 'আপনি কি নিশ্চিত যে সফটওয়্যার থেকে লগআউট করে লগইন স্ক্রিনে ফিরে যেতে চান?' 
+                : 'Are you sure you want to log out and return to the login screen?'}
             </p>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -282,7 +274,7 @@ export const Header: React.FC = () => {
                 onClick={() => setShowLogoutModal(false)}
                 className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition cursor-pointer"
               >
-                না, থাকুন
+                {language === 'bn' ? 'না, থাকুন' : 'Cancel'}
               </button>
               <button
                 type="button"
@@ -290,7 +282,7 @@ export const Header: React.FC = () => {
                 className="px-5 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow transition active:scale-95 cursor-pointer flex items-center gap-1.5"
               >
                 <LogOut className="w-3.5 h-3.5" />
-                <span>হ্যাঁ, লগআউট করুন</span>
+                <span>{language === 'bn' ? 'হ্যাঁ, লগআউট করুন' : 'Yes, Log Out'}</span>
               </button>
             </div>
           </div>

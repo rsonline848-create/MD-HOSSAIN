@@ -1,26 +1,35 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense, lazy } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
-import { DashboardView } from './components/DashboardView';
-import { NewInvoiceView } from './components/NewInvoiceView';
-import { DueCollectionView } from './components/DueCollectionView';
-import { SupplierBillView } from './components/SupplierBillView';
-import { DateSalesView } from './components/DateSalesView';
-import { CustomersView } from './components/CustomersView';
-import { SuppliersView } from './components/SuppliersView';
-import { DailyExpensesView } from './components/DailyExpensesView';
-import { CashTallyView } from './components/CashTallyView';
-import { Modals } from './components/Modals';
-import { SettingsModal } from './components/SettingsModal';
-import { BranchModal } from './components/BranchModal';
 import { LoginPage } from './components/LoginPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import Chatbot from './components/Chatbot';
-import { LicenseLockScreen } from './components/LicenseLockScreen';
-import { LicenseModal } from './components/LicenseModal';
-import { OnlineUsersModal } from './components/OnlineUsersModal';
-import { toBengaliNumber, formatDate } from './utils/formatters';
+
+// Lazy loaded views and modals for optimized bundle size and fast page load
+const DashboardView = lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
+const NewInvoiceView = lazy(() => import('./components/NewInvoiceView').then(m => ({ default: m.NewInvoiceView })));
+const ExchangeView = lazy(() => import('./components/ExchangeView').then(m => ({ default: m.ExchangeView })));
+const DueCollectionView = lazy(() => import('./components/DueCollectionView').then(m => ({ default: m.DueCollectionView })));
+const SupplierBillView = lazy(() => import('./components/SupplierBillView').then(m => ({ default: m.SupplierBillView })));
+const DateSalesView = lazy(() => import('./components/DateSalesView').then(m => ({ default: m.DateSalesView })));
+const CustomersView = lazy(() => import('./components/CustomersView').then(m => ({ default: m.CustomersView })));
+const SuppliersView = lazy(() => import('./components/SuppliersView').then(m => ({ default: m.SuppliersView })));
+const ProductsView = lazy(() => import('./components/ProductsView').then(m => ({ default: m.ProductsView })));
+const DailyExpensesView = lazy(() => import('./components/DailyExpensesView').then(m => ({ default: m.DailyExpensesView })));
+const CashTallyView = lazy(() => import('./components/CashTallyView').then(m => ({ default: m.CashTallyView })));
+const InvestmentLoansView = lazy(() => import('./components/InvestmentLoansView').then(m => ({ default: m.InvestmentLoansView })));
+const EmployeesView = lazy(() => import('./components/EmployeesView').then(m => ({ default: m.EmployeesView })));
+const Modals = lazy(() => import('./components/Modals').then(m => ({ default: m.Modals })));
+const SettingsModal = lazy(() => import('./components/SettingsModal').then(m => ({ default: m.SettingsModal })));
+const BranchModal = lazy(() => import('./components/BranchModal').then(m => ({ default: m.BranchModal })));
+const Chatbot = lazy(() => import('./components/Chatbot'));
+
+const ViewLoader: React.FC = () => (
+  <div className="flex flex-col items-center justify-center min-h-[40vh] p-8 text-center animate-pulse">
+    <div className="w-8 h-8 border-3 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-3"></div>
+    <p className="text-xs font-semibold text-slate-500">লোড হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...</p>
+  </div>
+);
 
 let autoBackupAttempted = false;
 
@@ -30,11 +39,7 @@ const MainContent: React.FC = () => {
     isAuthenticated, 
     logout, 
     smtpSettings, 
-    generateBackupJsonString,
-    license,
-    isLicenseExpired,
-    licenseDaysLeft,
-    setIsLicenseManagerOpen
+    generateBackupJsonString
   } = useApp();
 
   // Auto-backup on first login of the day
@@ -61,7 +66,7 @@ const MainContent: React.FC = () => {
             body: JSON.stringify({
               smtpSettings,
               backupData,
-              filename: `ML_Electric_Auto_Backup_${todayStr.replace(/\//g, '-')}.json`
+              filename: `Bismillah_Traders_Auto_Backup_${todayStr.replace(/\//g, '-')}.json`
             })
           });
 
@@ -132,88 +137,59 @@ const MainContent: React.FC = () => {
     };
   }, []);
 
-  if (isLicenseExpired) {
-    return (
-      <>
-        <LicenseLockScreen />
-        <LicenseModal />
-      </>
-    );
-  }
-
   if (!isAuthenticated) {
-    return (
-      <>
-        <LoginPage />
-        <LicenseModal />
-      </>
-    );
+    return <LoginPage />;
   }
-
-  const expiryDateFormatted = license?.expiresAt?.split('T')[0] || '2026-09-15';
-  const showWarningBanner = licenseDaysLeft <= 15;
 
   return (
-    <div className="min-h-screen whatsapp-bg flex flex-col font-sans antialiased text-slate-800 selection:bg-indigo-500 selection:text-white">
-      {/* License Notice Banner */}
-      {showWarningBanner ? (
-        <div className="print:hidden bg-rose-600 text-white text-center py-2 px-4 text-xs sm:text-sm font-bold shadow-md relative z-50 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3">
-          <span>⚠️ আপনার অ্যাপের লাইসেন্সের মেয়াদ আর মাত্র {toBengaliNumber(licenseDaysLeft)} দিন বাকি ({toBengaliNumber(formatDate(expiryDateFormatted))})!</span>
-          <span>রিনিউ (Renew) করতে {license.providerName || 'RS ONLINE'} এর সাথে যোগাযোগ করুন: <a href={`tel:${license.supportPhone || '01611814813'}`} className="underline hover:text-rose-200">{license.supportPhone || '01611814813'}</a></span>
-          <button 
-            type="button"
-            onClick={() => setIsLicenseManagerOpen(true)}
-            className="bg-white text-rose-700 hover:bg-rose-100 px-2.5 py-0.5 rounded-full text-xs font-bold transition shadow-xs cursor-pointer"
-          >
-            রিনিউ করুন
-          </button>
-        </div>
-      ) : (
-        <div className="print:hidden bg-indigo-900 text-indigo-100 text-center py-1.5 px-4 text-xs font-semibold shadow-xs relative z-50 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-3">
-          <span>অনলাইন লাইসেন্স সক্রিয় | মেয়াদ: {toBengaliNumber(formatDate(expiryDateFormatted))} ({toBengaliNumber(licenseDaysLeft)} দিন বাকি)</span>
-          <span>প্রোভাইডার: {license.providerName || 'RS ONLINE'} (<a href={`tel:${license.supportPhone || '01611814813'}`} className="underline hover:text-white">{license.supportPhone || '01611814813'}</a>)</span>
-        </div>
-      )}
-
-      {/* Header */}
+    <div className="h-screen h-[100dvh] flex flex-col whatsapp-bg font-sans antialiased text-slate-800 selection:bg-indigo-500 selection:text-white overflow-hidden app-root-layout">
+      {/* Header - Stays fixed at top */}
       <Header />
 
       {/* Workspace Area: Left Side Menu Bar + Right Main Content */}
-      <div className="flex-1 flex flex-col sm:flex-row items-stretch w-full">
-        {/* Left Side Navigation Menu Bar */}
+      <div className="flex-1 flex flex-col sm:flex-row items-stretch w-full min-h-0 overflow-hidden">
+        {/* Left Side Navigation Menu Bar - Stationary on the left */}
         <Navigation />
 
-        {/* Dynamic Tab Body */}
-        <main className="flex-1 min-w-0 pb-10 pt-2">
-          {currentTab === 'dashboard' && <DashboardView />}
-          {currentTab === 'new_invoice' && <NewInvoiceView />}
-          {currentTab === 'due_collection' && <DueCollectionView />}
-          {currentTab === 'supplier_bill' && <SupplierBillView />}
-          {currentTab === 'date_sales' && <DateSalesView />}
-          {currentTab === 'customers' && <CustomersView />}
-          {currentTab === 'suppliers' && <SuppliersView />}
-          {currentTab === 'daily_expenses' && <DailyExpensesView />}
-          {currentTab === 'cash_tally' && <CashTallyView />}
+        {/* Dynamic Tab Body - Right side content scrolls independently */}
+        <main className="flex-1 min-w-0 h-full overflow-y-auto pb-16 pt-2 flex flex-col justify-between">
+          <div>
+            <Suspense fallback={<ViewLoader />}>
+              {currentTab === 'dashboard' && <DashboardView />}
+              {currentTab === 'new_invoice' && <NewInvoiceView />}
+              {currentTab === 'exchange' && <ExchangeView />}
+              {currentTab === 'due_collection' && <DueCollectionView />}
+              {currentTab === 'supplier_bill' && <SupplierBillView />}
+              {currentTab === 'products' && <ProductsView />}
+              {currentTab === 'date_sales' && <DateSalesView />}
+              {currentTab === 'customers' && <CustomersView />}
+              {currentTab === 'suppliers' && <SuppliersView />}
+              {currentTab === 'employees' && <EmployeesView />}
+              {currentTab === 'daily_expenses' && <DailyExpensesView />}
+              {currentTab === 'cash_tally' && <CashTallyView />}
+              {currentTab === 'investment_loans' && <InvestmentLoansView />}
+            </Suspense>
+          </div>
+
+          {/* Footer - at bottom of right content scroll */}
+          <footer className="mt-8 bg-slate-800 text-white text-xs py-4 px-4 border-t border-slate-700 print:hidden flex justify-between items-center shrink-0">
+            <p className="font-semibold">
+              BISMILLAH TRADERS
+            </p>
+            <p className="font-medium">
+              © {new Date().getFullYear()} RS ONLINE
+            </p>
+          </footer>
         </main>
       </div>
 
       {/* Modals & Dialogs */}
-      <Modals />
-      <SettingsModal />
-      <BranchModal />
-      <LicenseModal />
-      <OnlineUsersModal />
-      <Chatbot />
-
-      {/* Footer */}
-      <footer className="bg-slate-800 text-white text-xs py-4 px-4 border-t border-slate-700 print:hidden flex justify-between items-center">
-        <p className="font-semibold">
-          ML ELECTRIC
-        </p>
-        <p className="font-medium">
-          © {new Date().getFullYear()} RS ONLINE
-        </p>
-      </footer>
+      <Suspense fallback={null}>
+        <Modals />
+        <SettingsModal />
+        <BranchModal />
+        <Chatbot />
+      </Suspense>
     </div>
   );
 };

@@ -34,8 +34,18 @@ body {
 /* Print optimizations for invoice slip & due receipt */
 @media print {
   @page {
-    margin: 10mm;
+    margin: 8mm;
     size: auto;
+  }
+  
+  html, body, #root, .app-root-layout {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
+    background-color: #ffffff !important;
+    background-image: none !important;
+    color: #000000 !important;
   }
   
   body, .whatsapp-bg {
@@ -44,8 +54,88 @@ body {
     color: #000000 !important;
   }
   
+  /* Always hide headers, navigations, footers and any print-hidden items */
+  header,
+  nav,
+  aside,
+  footer,
   .print\:hidden {
     display: none !important;
+  }
+
+  /* CRITICAL: When printing an invoice or receipt modal, completely HIDE background page content (header, nav, main views, footer) */
+  body.invoice-modal-open header,
+  body.invoice-modal-open nav,
+  body.invoice-modal-open aside,
+  body.invoice-modal-open footer,
+  body.invoice-modal-open main,
+  body:has(#printable-invoice) header,
+  body:has(#printable-invoice) nav,
+  body:has(#printable-invoice) aside,
+  body:has(#printable-invoice) footer,
+  body:has(#printable-invoice) main,
+  body:has(#printable-due-receipt) header,
+  body:has(#printable-due-receipt) nav,
+  body:has(#printable-due-receipt) aside,
+  body:has(#printable-due-receipt) footer,
+  body:has(#printable-due-receipt) main,
+  body.printing-modal-only header,
+  body.printing-modal-only nav,
+  body.printing-modal-only aside,
+  body.printing-modal-only footer,
+  body.printing-modal-only main {
+    display: none !important;
+  }
+
+  /* Reset modal overlay so the printable card sits naturally at the top of the printed page */
+  body.invoice-modal-open .fixed,
+  body:has(#printable-invoice) .fixed,
+  body:has(#printable-due-receipt) .fixed,
+  body.printing-modal-only .fixed {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    inset: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  #printable-invoice,
+  #printable-due-receipt {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    border: none !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+  }
+
+  /* Ensure print tables retain borders, headers, and backgrounds */
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+  th, td {
+    border: 1px solid #94a3b8 !important;
+  }
+  th {
+    background-color: #f1f5f9 !important;
+    border-bottom: 2px solid #0f172a !important;
+  }
+  tfoot tr {
+    background-color: #f8fafc !important;
+    border-top: 2px solid #0f172a !important;
   }
 
   /* Prevent page breaks inside tables and summary cards */

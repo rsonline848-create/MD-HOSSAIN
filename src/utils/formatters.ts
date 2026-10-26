@@ -1,11 +1,47 @@
 // Bengali and English number conversion & formatting utilities
+import type { SupplierBillItem } from '../types';
 
 const bengaliDigits = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
 const englishDigits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 
-export const toBengaliNumber = (num: number | string | undefined | null): string => {
-  if (num === undefined || num === null || num === '') return '০';
-  const str = num.toString();
+let currentAppLanguage: 'bn' | 'en' = 
+  typeof window !== 'undefined' && localStorage.getItem('ML_ELECTRIC_LANGUAGE') === 'en' ? 'en' : 'bn';
+
+export const setFormatterLanguage = (lang: 'bn' | 'en') => {
+  currentAppLanguage = lang;
+};
+
+export const getFormatterLanguage = (): 'bn' | 'en' => currentAppLanguage;
+
+export const toBengaliNumber = (num: number | string | undefined | null, forceBn = false): string => {
+  if (num === undefined || num === null || num === '') {
+    return (!forceBn && currentAppLanguage === 'en') ? '0' : '০';
+  }
+  let str: string;
+  if (typeof num === 'number') {
+    if (isNaN(num)) return (!forceBn && currentAppLanguage === 'en') ? '0' : '০';
+    // Clean floating point noise, max 2 decimal places
+    const cleanNum = Number.isInteger(num) ? num : Math.round((num + Number.EPSILON) * 100) / 100;
+    str = cleanNum.toString();
+  } else {
+    str = num.toString().trim();
+    // If it's a numeric string with floating point artifacts (e.g. "154124.2599999979")
+    if (/^-?\d+\.\d+$/.test(str)) {
+      const parsed = parseFloat(str);
+      if (!isNaN(parsed)) {
+        str = (Math.round((parsed + Number.EPSILON) * 100) / 100).toString();
+      }
+    }
+  }
+
+  if (!forceBn && currentAppLanguage === 'en') {
+    // If in English mode and the string has Bengali digits, convert them to English
+    let res = str;
+    for (let i = 0; i < 10; i++) {
+      res = res.replaceAll(bengaliDigits[i], englishDigits[i]);
+    }
+    return res;
+  }
   return str.replace(/\d/g, (d) => bengaliDigits[parseInt(d, 10)] || d);
 };
 
@@ -18,6 +54,43 @@ export const toEnglishNumber = (str: string): number => {
   const clean = result.replace(/[^0-9.-]/g, '');
   const parsed = parseFloat(clean);
   return isNaN(parsed) ? 0 : parsed;
+};
+
+/**
+ * Converts any Bengali digits (০-৯) to English digits (0-9).
+ * Preserves all non-digit characters.
+ */
+export const toEnglishDigits = (val: string | number | undefined | null): string => {
+  if (val === undefined || val === null) return '';
+  let str = String(val);
+  for (let i = 0; i < 10; i++) {
+    str = str.replaceAll(bengaliDigits[i], englishDigits[i]);
+  }
+  return str;
+};
+
+/**
+ * Specifically for numeric input fields (quantities, prices, cash, discount, etc.):
+ * Automatically converts Bengali digits to English digits, allowing only 0-9 and at most one decimal point.
+ */
+export const normalizeNumericInput = (val: string | number | undefined | null): string => {
+  if (val === undefined || val === null) return '';
+  let str = toEnglishDigits(val);
+  str = str.replace(/[^0-9.]/g, '');
+  const parts = str.split('.');
+  if (parts.length > 2) {
+    str = parts[0] + '.' + parts.slice(1).join('');
+  }
+  return str;
+};
+
+/**
+ * For memo numbers, receipt numbers, codes, phone numbers, etc.:
+ * Converts any Bengali digits to English digits while preserving letters and symbols.
+ */
+export const normalizeInputDigits = (val: string | number | undefined | null): string => {
+  if (val === undefined || val === null) return '';
+  return toEnglishDigits(val);
 };
 
 export const formatCurrency = (amount: number | string | undefined | null, useBengali = false): string => {
@@ -33,35 +106,60 @@ export const formatCurrency = (amount: number | string | undefined | null, useBe
   return `${formatted} ৳`;
 };
 
-export const formatDate = (dateStr: string): string => {
-  if (!dateStr) return '';
+export const formatDate = (dateInput: string | number | Date | null | undefined): string => {
+  if (!dateInput) return '';
   try {
-    const str = String(dateStr).trim();
-    if (!str) return '';
-    let y = '', m = '', d = '';
-    
-    // ISO string with T
-    let p = str;
-    if (str.includes('T')) {
-      p = str.split('T')[0];
+    if (dateInput instanceof Date) {
+      if (isNaN(dateInput.getTime())) return '';
+      const day = String(dateInput.getDate()).padStart(2, '0');
+      const month = String(dateInput.getMonth() + 1).padStart(2, '0');
+      const year = dateInput.getFullYear();
+      return `${day}/${month}/${year}`;
     }
-    
+
+    if (typeof dateInput === 'number') {
+      const dObj = new Date(dateInput);
+      if (isNaN(dObj.getTime())) return '';
+      const day = String(dObj.getDate()).padStart(2, '0');
+      const month = String(dObj.getMonth() + 1).padStart(2, '0');
+      const year = dObj.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+
+    let str = String(dateInput).trim();
+    if (!str) return '';
+
+    // Convert any Bengali numerals if present (e.g. ২৩-১০-২০২৬)
+    str = str.replace(/[০-৯]/g, (ch) => String('০১২৩৪৫৬৭৮৯'.indexOf(ch)));
+
+    // ISO string with T or space
+    if (str.includes('T')) {
+      str = str.split('T')[0];
+    } else if (str.includes(' ')) {
+      const parts = str.split(' ');
+      if (parts[0] && (parts[0].includes('-') || parts[0].includes('/'))) {
+        str = parts[0];
+      }
+    }
+
     // YYYY-M-D or YYYY/M/D
-    const ymdMatch = p.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+    const ymdMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
     if (ymdMatch) {
-      y = ymdMatch[1];
-      m = ymdMatch[2].padStart(2, '0');
-      d = ymdMatch[3].padStart(2, '0');
+      const y = ymdMatch[1];
+      const m = ymdMatch[2].padStart(2, '0');
+      const d = ymdMatch[3].padStart(2, '0');
       return `${d}/${m}/${y}`;
     }
-    
+
     // DD/MM/YYYY, DD-MM-YYYY or MM/DD/YYYY
-    const dmyMatch = p.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+    const dmyMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
     if (dmyMatch) {
       const p1 = parseInt(dmyMatch[1], 10);
       const p2 = parseInt(dmyMatch[2], 10);
-      y = dmyMatch[3];
-          
+      const y = dmyMatch[3];
+      let d = '';
+      let m = '';
+
       if (p1 > 12 && p2 <= 12) {
         // DD-MM-YYYY
         d = String(p1).padStart(2, '0');
@@ -77,10 +175,19 @@ export const formatDate = (dateStr: string): string => {
       }
       return `${d}/${m}/${y}`;
     }
-    
-    return p;
+
+    // Fallback try standard Date parsing
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      const day = String(parsed.getDate()).padStart(2, '0');
+      const month = String(parsed.getMonth() + 1).padStart(2, '0');
+      const year = parsed.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+
+    return str;
   } catch {
-    return dateStr;
+    return String(dateInput || '');
   }
 };
 
@@ -233,23 +340,24 @@ export const numberToBengaliWords = (amount: number): string => {
   }
 };
 
-export const formatDateTimeBengali = (isoStr: string): string => {
+export const formatDateTimeBengali = (isoStr: string | number | Date): string => {
   if (!isoStr) return '';
   try {
     const date = new Date(isoStr);
-    // Fallback if date is invalid
-    if (isNaN(date.getTime())) return isoStr;
+    if (isNaN(date.getTime())) return String(isoStr);
     
-    return new Intl.DateTimeFormat('bn-BD', {
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true
-    }).format(date);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    let hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    const hoursStr = String(hours).padStart(2, '0');
+
+    return `${day}/${month}/${year}, ${hoursStr}:${minutes} ${ampm}`;
   } catch (e) {
-    return isoStr;
+    return String(isoStr);
   }
 };
 
@@ -281,3 +389,138 @@ export const isDateInRange = (d?: string | null, start?: string | null, end?: st
   
   return dn >= sn && dn <= en;
 };
+
+/**
+ * Natural numerical comparator for product names (e.g. 1.1, 4.2, 4.2round, 4.3, 5.5, 5.5squre, 6round, 10.10).
+ * Sorts numbers in ascending order (smaller at the top, larger at the bottom).
+ */
+export const compareProductNames = (nameA: string, nameB: string): number => {
+  const normalize = (str: string) => {
+    const bn = ['০', '১', '২', '৩', '৪', '৫', '৬', '৭', '৮', '৯'];
+    return (str || '')
+      .replace(/[০-৯]/g, (d) => String(bn.indexOf(d)))
+      .trim()
+      .toLowerCase();
+  };
+
+  const normA = normalize(nameA);
+  const normB = normalize(nameB);
+
+  if (normA === normB) return 0;
+
+  const parseNumParts = (numStr: string) => {
+    if (!numStr) return [];
+    return numStr.split('.').map((p) => parseInt(p, 10) || 0);
+  };
+
+  // Match optional prefix, the embedded/leading number, and remainder suffix
+  // e.g. "6round" -> prefix: "", num: "6", suffix: "round"
+  // e.g. "5.5squre" -> prefix: "", num: "5.5", suffix: "squre"
+  // e.g. "10.10" -> prefix: "", num: "10.10", suffix: ""
+  // e.g. "রড 4.2" -> prefix: "রড ", num: "4.2", suffix: ""
+  const matchA = normA.match(/^(.*?)(\d+(?:\.\d+)*)(.*)$/);
+  const matchB = normB.match(/^(.*?)(\d+(?:\.\d+)*)(.*)$/);
+
+  if (matchA && matchB) {
+    const prefixA = matchA[1].replace(/[\s\-_]/g, '');
+    const prefixB = matchB[1].replace(/[\s\-_]/g, '');
+
+    // If both have the same prefix (including both having no prefix, like "6round" vs "5.5squre")
+    if (prefixA === prefixB) {
+      const partsA = parseNumParts(matchA[2]);
+      const partsB = parseNumParts(matchB[2]);
+      const maxLen = Math.max(partsA.length, partsB.length);
+
+      for (let i = 0; i < maxLen; i++) {
+        const valA = partsA[i] ?? 0;
+        const valB = partsB[i] ?? 0;
+        if (valA !== valB) {
+          return valA - valB;
+        }
+      }
+
+      // If numeric values are identical, compare remaining suffix (e.g. "4.2round" vs "4.2square")
+      const suffixA = (matchA[3] || '').trim();
+      const suffixB = (matchB[3] || '').trim();
+      return suffixA.localeCompare(suffixB, undefined, { numeric: true, sensitivity: 'base' });
+    }
+
+    // If both start with numbers (no prefix at all)
+    if (!prefixA && !prefixB) {
+      const partsA = parseNumParts(matchA[2]);
+      const partsB = parseNumParts(matchB[2]);
+      const maxLen = Math.max(partsA.length, partsB.length);
+
+      for (let i = 0; i < maxLen; i++) {
+        const valA = partsA[i] ?? 0;
+        const valB = partsB[i] ?? 0;
+        if (valA !== valB) {
+          return valA - valB;
+        }
+      }
+    }
+  }
+
+  // Fallback to standard natural alphanumeric sort
+  return normA.localeCompare(normB, undefined, { numeric: true, sensitivity: 'base' });
+};
+
+/**
+ * Extracts structured items from a supplier bill,
+ * either from the bill.items array or by parsing bill.itemsDescription.
+ */
+export const extractSupplierBillItems = (
+  bill: { items?: SupplierBillItem[]; itemsDescription?: string; id?: string; totalAmount?: number }
+): SupplierBillItem[] => {
+  if (Array.isArray(bill.items) && bill.items.length > 0) {
+    return bill.items.map((it, idx) => ({
+      id: it.id || `item_${idx}_${bill.id || Date.now()}`,
+      productId: it.productId,
+      name: it.name || 'পণ্য',
+      quantity: Number(it.quantity) || 0,
+      unitPrice: Number(it.unitPrice) || 0,
+      lineTotal: it.lineTotal !== undefined ? Number(it.lineTotal) : Math.round((Number(it.quantity) || 0) * (Number(it.unitPrice) || 0))
+    }));
+  }
+
+  const items: SupplierBillItem[] = [];
+  if (!bill.itemsDescription) return items;
+
+  let raw = bill.itemsDescription.trim();
+  // Strip [নোট: ...]
+  raw = raw.replace(/\[নোট:\s*[^\]]+\]/, '').trim();
+  raw = raw.replace(/,\s*$/, '').trim();
+
+  // Split by newlines, semicolons, or commas between products
+  const parts = raw.split(/\n|(?<=\))\s*,\s*|;\s*/).map(p => p.trim()).filter(Boolean);
+  parts.forEach((part, idx) => {
+    // Pattern: Name (Qty @ Rate) or Name (Qty KG @ Rate ৳)
+    const m = part.match(/^(.*?)\s*\((.*?)\s*@\s*(.*?)\)$/);
+    if (m) {
+      const name = m[1].trim();
+      const rawQty = m[2].replace(/[^০-৯0-9.]/g, '');
+      const rawRate = m[3].replace(/[^০-৯0-9.]/g, '');
+      const qtyNum = toEnglishNumber(rawQty) || 0;
+      const rateNum = toEnglishNumber(rawRate) || 0;
+      items.push({
+        id: `parsed_${idx}_${bill.id || Date.now()}`,
+        name: name || 'পণ্য',
+        quantity: qtyNum,
+        unitPrice: rateNum,
+        lineTotal: Math.round(qtyNum * rateNum)
+      });
+    } else if (part) {
+      items.push({
+        id: `parsed_${idx}_${bill.id || Date.now()}`,
+        name: part,
+        quantity: 0,
+        unitPrice: 0,
+        lineTotal: 0
+      });
+    }
+  });
+
+  return items;
+};
+
+

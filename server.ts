@@ -4,7 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
-import { db } from "./src/db/index.ts";
+import { db, createPool } from "./src/db/index.ts";
 import { shops } from "./src/db/schema.ts";
 import { eq } from "drizzle-orm";
 
@@ -21,8 +21,12 @@ async function startServer() {
   
   app.get("/api/shopData", async (req, res) => {
     try {
-      const shopId = req.query.shopId || "ml_electric_main";
-      const result = await db.select().from(shops).where(eq(shops.id, shopId as string));
+      const rawShopId = (req.query.shopId as string) || "bismillah_traders_main";
+      const shopId = rawShopId === "ml_electric_main" ? "bismillah_traders_main" : rawShopId;
+      let result = await db.select().from(shops).where(eq(shops.id, shopId));
+      if (result.length === 0 && shopId === "bismillah_traders_main") {
+        result = await db.select().from(shops).where(eq(shops.id, "ml_electric_main"));
+      }
       if (result.length > 0) {
         res.json({ success: true, data: result[0].data });
       } else {
@@ -47,6 +51,15 @@ async function startServer() {
   // Database sanitization: remove old/default password 139210 permanently from all shops
   async function sanitizeDatabasePasswords() {
     try {
+      const pool = createPool();
+      if (pool) {
+        await pool.query(`CREATE TABLE IF NOT EXISTS shops (
+          id text PRIMARY KEY NOT NULL,
+          data jsonb NOT NULL,
+          updated_at timestamp DEFAULT now()
+        );`);
+      }
+
       const allShops = await db.select().from(shops);
       for (const shop of allShops) {
         const shopData = shop.data as any;
@@ -108,7 +121,7 @@ async function startServer() {
     try {
       const result = await db.select().from(shops);
       // First check main shop
-      const mainShop = result.find(s => s.id === "ml_electric_main");
+      const mainShop = result.find(s => s.id === "bismillah_traders_main" || s.id === "ml_electric_main");
       if (mainShop) {
         const data = mainShop.data as any;
         if (data && Array.isArray(data.branches) && data.branches.length > 0) {
@@ -151,7 +164,8 @@ async function startServer() {
 
   app.post("/api/shopData", async (req, res) => {
     try {
-      const shopId = req.body.shopId || "ml_electric_main";
+      const rawShopId = req.body.shopId || "bismillah_traders_main";
+      const shopId = rawShopId === "ml_electric_main" ? "bismillah_traders_main" : rawShopId;
       let payload = req.body.payload;
       if (payload && Array.isArray(payload.users)) {
         payload = {
@@ -180,7 +194,7 @@ async function startServer() {
   app.delete("/api/shopData", async (req, res) => {
     try {
       const shopId = req.query.shopId as string;
-      if (shopId && shopId !== "ml_electric_main") {
+      if (shopId && shopId !== "bismillah_traders_main" && shopId !== "ml_electric_main") {
         await db.delete(shops).where(eq(shops.id, shopId));
         res.json({ success: true });
       } else {
@@ -231,20 +245,23 @@ async function startServer() {
     try {
       const result = await db.select().from(shops).where(eq(shops.id, "presence_data"));
       let presenceMap: Record<string, any> = {};
-      if (result.length > 0 && result[0].data) {
+      if (result.length > 0 && result[0].data && typeof result[0].data === "object" && !Array.isArray(result[0].data)) {
         presenceMap = result[0].data as Record<string, any>;
       }
 
       const now = Date.now();
-      const presenceList = Object.values(presenceMap).map((p: any) => {
-        const lastActiveTime = p.lastActive ? new Date(p.lastActive).getTime() : 0;
-        // User is online if last heartbeat was within the last 90 seconds AND not manually logged out
-        const isRecentlyActive = now - lastActiveTime < 90 * 1000;
-        return {
-          ...p,
-          isOnline: Boolean(p.isOnline && isRecentlyActive)
-        };
-      });
+      const rawValues = presenceMap ? Object.values(presenceMap) : [];
+      const presenceList = rawValues
+        .filter((p: any) => p && typeof p === "object" && p.userId)
+        .map((p: any) => {
+          const lastActiveTime = p.lastActive ? new Date(p.lastActive).getTime() : 0;
+          // User is online if last heartbeat was within the last 90 seconds AND not manually logged out
+          const isRecentlyActive = !isNaN(lastActiveTime) && (now - lastActiveTime < 90 * 1000);
+          return {
+            ...p,
+            isOnline: Boolean(p.isOnline && isRecentlyActive)
+          };
+        });
 
       res.json({ success: true, presence: presenceList });
     } catch (e: any) {
@@ -306,9 +323,9 @@ async function startServer() {
       }
 
       const result = await db.select().from(shops).where(eq(shops.id, "presence_data"));
-      if (result.length > 0 && result[0].data) {
+      if (result.length > 0 && result[0].data && typeof result[0].data === "object" && !Array.isArray(result[0].data)) {
         const presenceMap = { ...(result[0].data as Record<string, any>) };
-        if (presenceMap[userId]) {
+        if (presenceMap[userId] && typeof presenceMap[userId] === "object") {
           presenceMap[userId] = {
             ...presenceMap[userId],
             isOnline: false,
@@ -356,9 +373,9 @@ async function startServer() {
       const info = await transporter.sendMail({
         from: fromName ? `"${fromName}" <${fromAddress}>` : fromAddress,
         to: testEmail,
-        subject: "Test Email from ML Electric",
-        text: "This is a test email sent from the ML Electric system to verify SMTP settings.",
-        html: "<p>This is a test email sent from the <strong>ML Electric</strong> system to verify SMTP settings.</p>",
+        subject: "Test Email from Bismillah Traders",
+        text: "This is a test email sent from the Bismillah Traders system to verify SMTP settings.",
+        html: "<p>This is a test email sent from the <strong>Bismillah Traders</strong> system to verify SMTP settings.</p>",
       });
 
       res.json({ success: true, messageId: info.messageId });
@@ -394,11 +411,11 @@ async function startServer() {
       const info = await transporter.sendMail({
         from: fromName ? `"${fromName}" <${fromAddress}>` : fromAddress,
         to: testEmail, // sending the backup to the test/admin email
-        subject: `Daily Auto Backup - ML Electric (${today})`,
-        text: `Please find the daily automatic backup attached for ML Electric.\n\nDate: ${today}`,
+        subject: `Daily Auto Backup - Bismillah Traders (${today})`,
+        text: `Please find the daily automatic backup attached for Bismillah Traders.\n\nDate: ${today}`,
         attachments: [
           {
-            filename: filename || `ML_Electric_Backup_${today}.json`,
+            filename: filename || `Bismillah_Traders_Backup_${today}.json`,
             content: backupData,
             contentType: 'application/json'
           }
@@ -425,7 +442,9 @@ async function startServer() {
       const ai = new GoogleGenAI({ apiKey });
       
       const systemInstruction = `
-You are an intelligent AI assistant for "ML Electric", an electrical shop management software. 
+You are an intelligent AI assistant for "Bismillah Traders" (বিসমিল্লাহ ট্রেডার্স), a shop and business accounting management software. 
+Address: 1470, Notun A.K School Road, Dokkhin Donia, Kodomtoli, Dhaka-1236.
+Mobile: 01885926704, 01718042483, 01720640137.
 You speak fluent Bengali (and English if requested). 
 Your job is to answer questions about the software usage AND the user's business data.
 

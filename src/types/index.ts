@@ -1,18 +1,26 @@
 export type TabType = 
   | 'dashboard' 
   | 'new_invoice' 
+  | 'exchange'
   | 'due_collection' 
   | 'supplier_bill' 
+  | 'products'
   | 'date_sales' 
   | 'customers' 
   | 'suppliers' 
+  | 'employees'
   | 'daily_expenses' 
-  | 'cash_tally';
+  | 'cash_tally'
+  | 'investment_loans';
+
+export type AppLanguage = 'bn' | 'en';
 
 export type PaymentMethod = 'cash' | 'online' | 'due' | 'mixed';
 
 export interface InvoiceItem {
   id: string;
+  productId?: string;
+  code?: string;
   name: string;
   category?: string;
   quantity: number;
@@ -41,6 +49,8 @@ export interface Invoice {
   onlineMethod?: 'bkash' | 'nagad' | 'rocket' | 'bank' | 'cheque' | 'goods';
   onlineTrxId?: string;
   dueAmount: number;
+  previousDue?: number;
+  totalDue?: number;
   status: 'paid' | 'partial' | 'due';
   notes?: string;
   createdBy: string;
@@ -54,7 +64,9 @@ export interface Customer {
   phone: string;
   address: string;
   openingDue: number;
+  discountPerKg?: number;
   totalPurchased: number;
+  totalKg?: number;
   totalPaid: number;
   currentDue: number;
   createdDate: string;
@@ -90,10 +102,22 @@ export interface Supplier {
   phone: string;
   address: string;
   openingPayable: number;
+  openingBalance?: number;
+  previousDue?: number;
   totalPurchased: number;
+  totalKg?: number;
   totalPaid: number;
   currentPayable: number;
   createdDate: string;
+}
+
+export interface SupplierBillItem {
+  id?: string;
+  productId?: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
 }
 
 export interface SupplierBill {
@@ -104,6 +128,7 @@ export interface SupplierBill {
   companyName: string;
   date: string;
   itemsDescription: string;
+  items?: SupplierBillItem[];
   totalAmount: number;
   cashPaid: number;
   onlinePaid: number;
@@ -140,10 +165,42 @@ export interface Expense {
   onlinePaid?: number;
   discount?: number;
   paymentMethod: 'cash' | 'online';
+  onlineMethod?: 'bkash' | 'nagad' | 'rocket' | 'bank' | 'cheque' | 'goods';
+  employeePaymentId?: string;
   notes?: string;
   createdAt: string;
   createdBy?: string;
   recordedBy?: string;
+}
+
+export interface Employee {
+  id: string;
+  name: string;
+  phone: string;
+  designation: string; // যেমন: সেলসম্যান, ম্যানেজার, হিসাবরক্ষক, ডেলিভারি, হেল্পার
+  salary: number; // মাসিক নির্ধারিত মূল বেতন
+  joinDate: string; // YYYY-MM-DD
+  status: 'active' | 'inactive'; // কর্মরত / অব্যাহতি
+  address?: string;
+  nidOrId?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface EmployeePayment {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  date: string; // YYYY-MM-DD
+  month: string; // e.g. "2026-10" or "অক্টোবর ২০২৬"
+  amount: number; // কত টাকা দেওয়া হলো
+  paymentType: 'salary' | 'advance' | 'bonus' | 'other'; // বেতন / অগ্রিম / বোনাস
+  paymentMethod: 'cash' | 'online';
+  onlineMethod?: 'bkash' | 'nagad' | 'rocket' | 'bank' | 'cheque';
+  expenseId?: string; // Auto-created expense ID in daily expenses
+  notes?: string;
+  paidBy: string;
+  createdAt: string;
 }
 
 export interface OpeningCashRecord {
@@ -222,7 +279,7 @@ export interface UserAccount {
 export interface AuditLog {
   id: string;
   action: string;
-  category: 'ইনভয়েস' | 'বাকি আদায়' | 'খরচ' | 'সাপ্লায়ার' | 'কাস্টমার' | 'ক্যাশ' | 'ইউজার' | 'সিস্টেম';
+  category: 'ইনভয়েস' | 'বাকি আদায়' | 'খরচ' | 'সাপ্লায়ার' | 'কাস্টমার' | 'ক্যাশ' | 'ইউজার' | 'সিস্টেম' | 'হিসাব';
   description: string;
   performedBy: string;
   timestamp: string;
@@ -231,7 +288,7 @@ export interface AuditLog {
 
 export interface RecycleBinItem {
   id: string;
-  type: 'invoice' | 'customer' | 'supplier' | 'expense' | 'due_payment' | 'supplier_bill';
+  type: 'invoice' | 'customer' | 'supplier' | 'expense' | 'due_payment' | 'supplier_bill' | 'investment' | 'loan' | 'loan_repayment';
   name: string;
   amount?: number;
   date: string;
@@ -240,15 +297,58 @@ export interface RecycleBinItem {
   originalData: unknown;
 }
 
+export interface Investment {
+  id: string;
+  investorName: string;
+  amount: number;
+  date: string; // YYYY-MM-DD
+  paymentMethod: 'cash' | 'bank' | 'online';
+  referenceNo?: string;
+  purpose?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface BankLoan {
+  id: string;
+  loanNo: string;
+  bankName: string;
+  branchName?: string;
+  accountNo?: string;
+  loanAmount: number; // Principal
+  sanctionDate: string; // YYYY-MM-DD
+  termMonths?: number;
+  interestRate?: number;
+  monthlyInstallment?: number;
+  notes?: string;
+  status: 'active' | 'closed';
+  createdAt: string;
+}
+
+export interface LoanRepayment {
+  id: string;
+  loanId: string;
+  bankName: string;
+  repaymentDate: string; // YYYY-MM-DD
+  amount: number;
+  paymentMethod: 'cash' | 'bank' | 'online' | 'cheque';
+  voucherNo?: string;
+  notes?: string;
+  createdAt: string;
+}
+
 export interface ProductCatalogItem {
   id: string;
+  code?: string; // Product Code (যেমন: P-101, B-01)
   name: string;
-  category: string;
-  unit: string;
-  salePrice: number;
-  purchasePrice: number;
-  stock: number;
+  category?: string;
+  unit: string; // যেমন: KG / কেজি, পিস, ইত্যাদি
+  salePrice: number; // Sale Price (৳)
+  purchasePrice: number; // Purchase Price (৳)
+  stock: number; // Current Stock (KG)
   barcode?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CashTallyRecord {
@@ -264,8 +364,13 @@ export interface CashTallyRecord {
   expectedCash: number;
   actualCash: number;
   difference: number;
+  bankDeposit?: number;
+  bankExpense?: number;
+  netBankBalance?: number;
   notes?: string;
   denominations?: Record<string, number>;
+  lastStockKg?: number; // ক্যাশ মিলানো শেষে ঐ দিনের সমাপনী মোট স্টক (KG)
+  stockSnapshot?: Record<string, number>; // প্রতিটি পণ্যের স্টক স্ন্যাপশট
   savedBy: string;
   savedAt: string;
 }

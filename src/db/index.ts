@@ -76,7 +76,7 @@ export const createPool = (): pg.Pool | null => {
       password: process.env.SQL_PASSWORD,
       database: process.env.SQL_DB_NAME,
       max: 10,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 15000,
     });
 
     // Prevent unhandled pool-level errors from crashing the application

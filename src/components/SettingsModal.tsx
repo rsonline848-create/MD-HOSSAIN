@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { X, Settings, Mail, Send, Award, KeyRound, ShieldCheck, ShieldAlert, Sparkles, ExternalLink } from 'lucide-react';
+import { X, Settings, Mail, Send, KeyRound, Languages, Check } from 'lucide-react';
 import { SMTPSettings } from '../types';
-import { toBengaliNumber, formatDate } from '../utils/formatters';
 
 export const SettingsModal: React.FC = () => {
   const { 
@@ -12,10 +11,9 @@ export const SettingsModal: React.FC = () => {
     setSmtpSettings, 
     forcePushToCloud, 
     currentUser,
-    license,
-    setIsLicenseManagerOpen,
-    isLicenseExpired,
-    licenseDaysLeft
+    language,
+    setLanguage,
+    t
   } = useApp();
   
   const [formData, setFormData] = useState<SMTPSettings>({
@@ -56,18 +54,18 @@ export const SettingsModal: React.FC = () => {
     setSmtpSettings(formData);
     localStorage.setItem('ML_ELECTRIC_SMTP', JSON.stringify(formData));
     forcePushToCloud({ smtpSettings: formData });
-    setSaveStatus('SMTP সেটিংস সফলভাবে সেভ হয়েছে!');
+    setSaveStatus(language === 'bn' ? 'সেটিংস সফলভাবে সেভ হয়েছে!' : 'Settings saved successfully!');
     setTimeout(() => setSaveStatus(null), 3000);
   };
 
   const handleTestEmail = async () => {
     if (!formData.testEmail) {
-      setTestEmailStatus('টেস্ট ইমেইল ঠিকানা দিন!');
+      setTestEmailStatus(language === 'bn' ? 'টেস্ট ইমেইল ঠিকানা দিন!' : 'Please enter a test email address!');
       setTimeout(() => setTestEmailStatus(null), 3000);
       return;
     }
     
-    setTestEmailStatus('টেস্ট ইমেইল পাঠানো হচ্ছে...');
+    setTestEmailStatus(language === 'bn' ? 'টেস্ট ইমেইল পাঠানো হচ্ছে...' : 'Sending test email...');
     try {
       const response = await fetch('/api/test-email', {
         method: 'POST',
@@ -80,12 +78,12 @@ export const SettingsModal: React.FC = () => {
       const data = await response.json();
       
       if (response.ok) {
-        setTestEmailStatus('টেস্ট ইমেইল সফলভাবে পাঠানো হয়েছে!');
+        setTestEmailStatus(language === 'bn' ? 'টেস্ট ইমেইল সফলভাবে পাঠানো হয়েছে!' : 'Test email sent successfully!');
       } else {
-        setTestEmailStatus(`সমস্যা: ${data.error || 'ইমেইল পাঠানো যায়নি'}`);
+        setTestEmailStatus(`${language === 'bn' ? 'সমস্যা:' : 'Error:'} ${data.error || (language === 'bn' ? 'ইমেইল পাঠানো যায়নি' : 'Failed to send email')}`);
       }
     } catch (error: any) {
-      setTestEmailStatus(`সমস্যা: ${error.message || 'সার্ভারের সাথে কানেক্ট করা যায়নি'}`);
+      setTestEmailStatus(`${language === 'bn' ? 'সমস্যা:' : 'Error:'} ${error.message || (language === 'bn' ? 'সার্ভারের সাথে কানেক্ট করা যায়নি' : 'Could not connect to server')}`);
     }
     
     setTimeout(() => setTestEmailStatus(null), 5000);
@@ -100,8 +98,12 @@ export const SettingsModal: React.FC = () => {
               <Settings className="w-5 h-5 text-indigo-600" />
             </div>
             <div>
-              <h2 className="text-lg font-bold">সিস্টেম সেটিংস</h2>
-              <p className="text-xs text-slate-500">ইমেইল নোটিফিকেশন ও অন্যান্য কনফিগারেশন</p>
+              <h2 className="text-lg font-bold">
+                {language === 'bn' ? 'সিস্টেম সেটিংস' : 'System Settings'}
+              </h2>
+              <p className="text-xs text-slate-500">
+                {language === 'bn' ? 'ভাষা নির্বাচন ও ইমেইল নোটিফিকেশন কনফিগারেশন' : 'Language selection, email notifications & configurations'}
+              </p>
             </div>
           </div>
           <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-700 bg-white shadow-sm p-2 rounded-full border border-slate-200">
@@ -110,53 +112,94 @@ export const SettingsModal: React.FC = () => {
         </div>
 
         <div className="p-4 sm:p-5 space-y-6 max-h-[70vh] overflow-y-auto">
-          {/* Cloud License & Subscription Section */}
-          <div className="border border-indigo-200 bg-gradient-to-br from-indigo-50/60 to-purple-50/40 rounded-xl overflow-hidden shadow-xs">
-            <div className="bg-indigo-900 text-white px-4 py-3 flex items-center justify-between">
+
+          {/* ======================================================== */}
+          {/* Language Selection Section (ভাষা নির্বাচন) */}
+          {/* ======================================================== */}
+          <div className="border border-indigo-200 bg-gradient-to-br from-indigo-50/50 to-white rounded-2xl p-4 sm:p-5 shadow-xs">
+            <div className="flex items-center justify-between gap-3 mb-3">
               <div className="flex items-center gap-2">
-                <Award className="w-4 h-4 text-indigo-300" />
-                <h3 className="font-bold text-sm">সফটওয়্যার ক্লাউড লাইসেন্স ও সাবস্ক্রিপশন</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsLicenseManagerOpen(true)}
-                className="bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                <span>লাইসেন্স নিয়ন্ত্রণ প্যানেল</span>
-                <ExternalLink className="w-3 h-3 ml-0.5" />
-              </button>
-            </div>
-            
-            <div className="p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="bg-white p-3 rounded-lg border border-indigo-100">
-                <span className="text-xs text-slate-500 font-medium block">বর্তমান অবস্থা</span>
-                <div className="mt-1 flex items-center gap-1.5 font-bold text-sm">
-                  {license.status === 'active' && !isLicenseExpired ? (
-                    <span className="text-emerald-700 flex items-center gap-1">
-                      <ShieldCheck className="w-4 h-4 text-emerald-600" /> সক্রিয় (Active)
-                    </span>
-                  ) : (
-                    <span className="text-rose-600 flex items-center gap-1">
-                      <ShieldAlert className="w-4 h-4 text-rose-600" /> মেয়াদ শেষ (Expired)
-                    </span>
-                  )}
+                <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center">
+                  <Languages className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-sm sm:text-base">
+                    {language === 'bn' ? 'ভাষা নির্বাচন (Select Language)' : 'Select Language / ভাষা নির্বাচন'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {language === 'bn' 
+                      ? 'পছন্দের ভাষা সিলেক্ট করলেই সাথে সাথে পুরো অ্যাপ সেই ভাষায় রূপান্তরিত হবে।' 
+                      : 'Choose your preferred language. The entire app will switch immediately.'}
+                  </p>
                 </div>
               </div>
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-300">
+                {language === 'bn' ? '🇧🇩 বাংলা সক্রিয়' : '🇺🇸 English Active'}
+              </span>
+            </div>
 
-              <div className="bg-white p-3 rounded-lg border border-indigo-100">
-                <span className="text-xs text-slate-500 font-medium block">অবশিষ্ট সময়</span>
-                <p className="mt-1 font-bold text-sm text-indigo-900">
-                  {isLicenseExpired ? '০ দিন (মেয়াদ উত্তীর্ণ)' : `${toBengaliNumber(licenseDaysLeft)} দিন বাকি`}
-                </p>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 mt-3">
+              {/* Option 1: বাংলা (Bangla) */}
+              <button
+                type="button"
+                onClick={() => setLanguage('bn')}
+                className={`relative flex items-center justify-between p-3.5 sm:p-4 rounded-xl border-2 transition-all cursor-pointer text-left ${
+                  language === 'bn'
+                    ? 'bg-emerald-50/70 border-emerald-600 text-slate-900 shadow-sm ring-2 ring-emerald-500/20'
+                    : 'bg-white border-slate-200 hover:border-emerald-300 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl select-none">🇧🇩</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-base text-slate-900">বাংলা (Bangla)</span>
+                      {language === 'bn' && (
+                        <span className="text-[10px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded">সক্রিয়</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      মেনু, ইনভয়েস, স্টক ও হিসাব সম্পূর্ণ বাংলায়
+                    </p>
+                  </div>
+                </div>
+                {language === 'bn' && (
+                  <div className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                    <Check className="w-4 h-4 stroke-[3]" />
+                  </div>
+                )}
+              </button>
 
-              <div className="bg-white p-3 rounded-lg border border-indigo-100">
-                <span className="text-xs text-slate-500 font-medium block">মেয়াদ উত্তীর্ণের তারিখ</span>
-                <p className="mt-1 font-bold text-sm text-slate-800">
-                  {toBengaliNumber(formatDate(license.expiresAt?.split('T')[0] || '2026-09-15'))}
-                </p>
-              </div>
+              {/* Option 2: English */}
+              <button
+                type="button"
+                onClick={() => setLanguage('en')}
+                className={`relative flex items-center justify-between p-3.5 sm:p-4 rounded-xl border-2 transition-all cursor-pointer text-left ${
+                  language === 'en'
+                    ? 'bg-indigo-50/70 border-indigo-600 text-slate-900 shadow-sm ring-2 ring-indigo-500/20'
+                    : 'bg-white border-slate-200 hover:border-indigo-300 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl select-none">🇺🇸</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-base text-slate-900">English</span>
+                      {language === 'en' && (
+                        <span className="text-[10px] font-bold bg-indigo-600 text-white px-1.5 py-0.5 rounded">Active</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Menus, Invoices, Stock & Reports in English
+                    </p>
+                  </div>
+                </div>
+                {language === 'en' && (
+                  <div className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                    <Check className="w-4 h-4 stroke-[3]" />
+                  </div>
+                )}
+              </button>
             </div>
           </div>
 
@@ -164,7 +207,9 @@ export const SettingsModal: React.FC = () => {
           <div className="border border-slate-200 rounded-xl overflow-hidden">
             <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex items-center gap-2">
               <Settings className="w-4 h-4 text-slate-600" />
-              <h3 className="font-bold text-slate-700 text-sm">SMTP configuration (ইমেইল সেটিংস)</h3>
+              <h3 className="font-bold text-slate-700 text-sm">
+                {language === 'bn' ? 'SMTP কনফিগারেশন (ইমেইল সেটিংস)' : 'SMTP Configuration (Email Settings)'}
+              </h3>
             </div>
             
             <div className="p-4 space-y-4">
@@ -326,13 +371,13 @@ export const SettingsModal: React.FC = () => {
               onClick={() => setActiveModal(null)}
               className="px-5 py-2.5 text-sm font-bold text-slate-700 bg-white border border-slate-300 rounded-xl shadow-sm hover:bg-slate-50 transition"
             >
-              বাতিল
+              {language === 'bn' ? 'বাতিল' : 'Cancel'}
             </button>
             <button
               onClick={handleSave}
               className="px-6 py-2.5 text-sm font-bold text-white bg-indigo-600 rounded-xl shadow-md shadow-indigo-200 hover:bg-indigo-700 transition"
             >
-              সেভ করুন
+              {language === 'bn' ? 'সেভ করুন' : 'Save Changes'}
             </button>
           </div>
         </div>
